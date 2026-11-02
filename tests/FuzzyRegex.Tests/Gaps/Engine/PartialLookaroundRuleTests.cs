@@ -466,10 +466,19 @@ public sealed class PartialLookaroundRuleTests
     /// answered P(0, 3). The last two rows are controls: 'aby' + 'd' completes each within the
     /// limits.
     /// </summary>
+    /// <remarks>
+    /// The second row has been a partial since D133: the body's second error, which would break the
+    /// outer limit, is refused when it is made, so 'abyx' is a complete match (the body takes its
+    /// <c>b</c> branch, the tail inserts the 'y'), and over 'aby' the tail's insertion fits the
+    /// outer section with the 'x' run out. Before D133 the body's first branch committed the
+    /// lookahead to a path the outer section fails, 'abyx' was None, and so was this.
+    /// </remarks>
     // Upstream answers None to the first two and the fourth, and P(0, 3) to the others.
     [Test]
     [Arguments(@"(?:a(?=(?:bcd){e<=2})bx){0<=e<=1}", false, 0)]
-    [Arguments(@"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", false, 0)]
+    // Since D133. Upstream 2026.9.29, measured 2026-11-02: P(0, 3) with one substitution here,
+    // and None over 'abyx'.
+    [Arguments(@"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", true, 1)]
     [Arguments(@"(?:a(?=(?:(?:bcd){1<=e<=1}))(?:b){1<=e<=1}){1<=e<=2}", true, 2)]
     [Arguments(@"(?:a(?!(?:bcd){e<=2})b.){e<=1}", false, 0)]
     [Arguments(@"(?:a(?=(?:bcd){e<=2})b.){0<=e<=1}", true, 1)]

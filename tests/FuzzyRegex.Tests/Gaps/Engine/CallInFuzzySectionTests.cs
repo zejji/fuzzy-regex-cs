@@ -24,8 +24,6 @@ public sealed class CallInFuzzySectionTests
     [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "b", "(0,0) s0i0d2")]
     [Arguments("(?:a(*SKIP)|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
     [Arguments("(?:a(*PRUNE)|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
-    // Written out: (2,2) s0i0d2.
-    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "bb", "(1,1) s0i0d2")]
     // No verb. Written out: (0,2) s0i0d2, the deeper level's first fit.
     [Arguments("(?:(?:[ab](?R)|(?(?<=[ab]).|a*))){2i+2d+1s<=4}", "ab", "(0,2) s0i0d1")]
     // A minimum on the section. Written out: None at depths 3 to 10.
@@ -40,6 +38,12 @@ public sealed class CallInFuzzySectionTests
     [Arguments("(?:a|(?:a(?R)|bb){2s+1d<=2})", "b", "(0,0) s0i0d2")]
     [Arguments("(?:a|(?:a(?R)|b){2s+1d<=1})", "bb", "(0,1) s0i0d1")]
     [Arguments("(?:a(*SKIP)|(?:a(?R)|bb){1s+1d<=2})", "b", "(0,1) s1i0d1")]
+    // Was the exception's (1,1) s0i0d2, written out (2,2) s0i0d2 (upstream's call form too): a
+    // deeper level substituted the 'a' its enclosing section can no longer afford and passed the
+    // (*SKIP) on that doomed path. Since D133 the substitution is refused when it is made, the
+    // deeper level matches 'b' with no error, and the call and its written-out form at depth 4
+    // both answer (0,2) with the one substitution at depth 0 (cost 2 of 2), measured 2026-11-02.
+    [Arguments("(?:a(*SKIP)|(?:a(?R)|b){2s+1d<=2})", "bb", "(0,2) s1i0d0")]
     public void A_call_in_a_fuzzy_section_answers_as_its_written_out_form(
         string pattern,
         string subject,
@@ -58,9 +62,12 @@ public sealed class CallInFuzzySectionTests
         "abaababa",
         "(0,5) s0i0d2 | (5,8) s0i0d2 | (8,8) s0i0d1"
     )]
-    // The exception (DECISIONS, 2026-10-17): the (?R) re-opens the section, so the re-entry is refused.
-    // Written out: (0,1) | (4,4) s0i0d2.
-    [Arguments("(?:a+(*SKIP)|(?:(?:a(?R)|[ab]b)){2s+1d<=2})", "abbb", "(0,1) | (3,3) s0i0d2 | (4,4) s0i0d2")]
+    // The (?R) re-opens the section (the exception, DECISIONS 2026-10-17). Before D133 this answered
+    // (0,1) | (3,3) s0i0d2 | (4,4) s0i0d2 and its written-out form (0,1) | (4,4) s0i0d2, both after
+    // a deeper level passed the (*SKIP) on a substitution its enclosing section could not afford.
+    // Since D133 that substitution is refused when it is made, and the call and its written-out
+    // form at depth 4 both find the match at 1 with one substitution, measured 2026-11-02.
+    [Arguments("(?:a+(*SKIP)|(?:(?:a(?R)|[ab]b)){2s+1d<=2})", "abbb", "(0,1) | (1,4) s1i0d0 | (4,4) s0i0d2")]
     public void A_call_in_a_fuzzy_section_finds_what_its_written_out_form_finds(
         string pattern,
         string subject,

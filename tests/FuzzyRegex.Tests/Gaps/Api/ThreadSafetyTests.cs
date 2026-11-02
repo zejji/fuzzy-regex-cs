@@ -805,7 +805,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.UpstreamGraphemeConjunct",
             // D121 added UpstreamConditionalRestore, likewise set only by
             // OracleComparer.RunWithTheUpstreamConditionalRestore.
-            "PatternObject.UpstreamConditionalRestore",
+            // D133 packed it with MaximaAsBeforeD133, likewise set only by the oracle's ablations.
+            "PatternObject._oracleSwitches",
             // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
             // likewise set only by the OracleComparer ablations.
             "PatternObject.SkipExactDeletionRetry",

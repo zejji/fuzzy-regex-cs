@@ -211,9 +211,12 @@ public sealed class FullFoldBackreferenceLeftoversTests
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
         m.FuzzyChanges.Insertions.Should().Equal(3);
 
-        // Upstream's re-entry restored, and nothing else changed, gives upstream's None.
+        // Upstream's re-entry restored, and nothing else changed, gives upstream's None. Since D133
+        // the outer {i<=1} refuses the substitution b-for-t as it is made, so the retry this row
+        // turns on is never reached unless D133's check is off too, as upstream has it.
         var reentered = new FuzzyRegex(Pattern);
         reentered.PatternObject.SkipRetriedFoldSteps = true;
+        reentered.PatternObject.MaximaAsBeforeD133 = true;
         reentered.FullMatch("stsbt").Success.Should().BeFalse();
     }
 

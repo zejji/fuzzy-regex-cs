@@ -478,8 +478,15 @@ internal static class OracleComparer
         // back upstream's answer on a partial row whose path breaks one. Not where D81's switch
         // alone already gives upstream's answer (D80): ledger entry 81 has no entry of its own, so
         // there the first entry whose own fix changes nothing claimed the row.
-        compiled.PatternObject.RunOutAsBeforeD81 =
-            namedAblation && !TheRunOutCheckAloneExplainsIt(row, timeout, lazy, compiled);
+        //
+        // D133 likewise: upstream asks only the innermost section's limits as an error is made, so
+        // every named ablation has that check off too (PatternObject.MaximaAsBeforeD133). Both stay
+        // on where D81's switch, D133's, or the two together give upstream's answer
+        // (TheEnclosingLimitChecksAloneExplainIt): D133 refuses, as it is made, the error a D81
+        // row's run-out followed, so such a row may need both off, and neither has an entry.
+        bool enclosingLimitsOff = namedAblation && !TheEnclosingLimitChecksAloneExplainIt(row, timeout, lazy, compiled);
+        compiled.PatternObject.RunOutAsBeforeD81 = enclosingLimitsOff;
+        compiled.PatternObject.MaximaAsBeforeD133 = enclosingLimitsOff;
         compiled.PatternObject.KeepCallCaptures = callCapturesStacked;
         compiled.PatternObject.DropNegativeTestCaptures = upstreamNegativeTestCaptures || namedAblation;
 
@@ -730,13 +737,18 @@ internal static class OracleComparer
             : withTheFix;
 
     /// <summary>
-    /// Whether D81's switch, and nothing else, gives upstream's answer to a row (D80).
+    /// Whether the switches of the enclosing sections' limit checks, D81's at a run-out or D133's
+    /// as each error is made, alone or together, and nothing else, give upstream's answer to a
+    /// row (D80).
     /// </summary>
     /// <remarks>
-    /// Where it does, a named ablation keeps the D81 check on, so that its agreement with upstream,
-    /// if it has one, is its own fix's. The check acts only at a run-out (<c>Matcher.RunOut</c> and
-    /// <c>Matcher.TheBodysRunOutWouldTaint</c>) and only where fuzzy sections nest, so any other
-    /// row is not asked again. Seed 7 row 42099 on <c>fix/insertion-runout</c> is the case: ledger
+    /// Where it does, a named ablation keeps both checks on, so that its agreement with upstream,
+    /// if it has one, is its own fix's. Both act only where fuzzy sections nest, so any other row
+    /// is not asked again. D81 checks the open sections' maximums at a run-out
+    /// (<c>Matcher.RunOut</c> and <c>Matcher.TheBodysRunOutWouldTaint</c>); D133 checks them as
+    /// each error is made (<c>Matcher.OneMoreErrorFitsTheOpenSections</c>), which refuses most of
+    /// the errors a D81 row's run-out followed, so such a row may need both switches off. D81's is
+    /// asked only of a partial row, since only a partial call runs out. Seed 7 row 42099 on <c>fix/insertion-runout</c> is the case: ledger
     /// entry 81 has no entry of its own, and <c>fuzzy-exact-item-offered-as-a-deletion</c> claimed
     /// it only because its ablation turns D81 (and with it D129) off.
     /// </remarks>
@@ -744,18 +756,58 @@ internal static class OracleComparer
     /// <param name="timeout">How long the matching call may take.</param>
     /// <param name="lazy">As for the run being controlled.</param>
     /// <param name="compiled">The pattern the controlled run compiled.</param>
-    /// <returns><see langword="true"/> if D81's switch alone agrees with upstream.</returns>
-    private static bool TheRunOutCheckAloneExplainsIt(
+    /// <returns><see langword="true"/> if those switches alone agree with upstream.</returns>
+    private static bool TheEnclosingLimitChecksAloneExplainIt(
         OracleRow row,
         TimeSpan timeout,
         bool lazy,
         FuzzyRegex compiled
     ) =>
-        row.Partial
-        && compiled.PatternObject.NestsFuzzySections
-        && Run(row, timeout, lazy, static c => c.PatternObject.RunOutAsBeforeD81 = true, composeWithD11: false)
-            is { } alone
-        && Compare(row, alone) == OracleVerdict.Agree;
+        compiled.PatternObject.NestsFuzzySections
+        && (
+            Agrees(
+                row,
+                Run(row, timeout, lazy, static c => c.PatternObject.MaximaAsBeforeD133 = true, composeWithD11: false)
+            )
+            || (
+                row.Partial
+                && (
+                    Agrees(
+                        row,
+                        Run(
+                            row,
+                            timeout,
+                            lazy,
+                            static c => c.PatternObject.RunOutAsBeforeD81 = true,
+                            composeWithD11: false
+                        )
+                    )
+                    || Agrees(
+                        row,
+                        Run(row, timeout, lazy, static c => WithoutTheEnclosingLimitChecks(c), composeWithD11: false)
+                    )
+                )
+            )
+        );
+
+    /// <summary>Whether an ablated run gave upstream's answer.</summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="outcome">The ablated run's answer, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if it agrees.</returns>
+    private static bool Agrees(OracleRow row, IOracleOutcome? outcome) =>
+        outcome is not null && Compare(row, outcome) == OracleVerdict.Agree;
+
+    /// <summary>
+    /// Turns off both checks of the enclosing sections' maximums, D81's at a run-out and D133's as
+    /// each error is made, on a pattern compiled for one call.
+    /// </summary>
+    /// <param name="compiled">The pattern.</param>
+    internal static void WithoutTheEnclosingLimitChecks(FuzzyRegex compiled)
+    {
+        ArgumentNullException.ThrowIfNull(compiled);
+        compiled.PatternObject.RunOutAsBeforeD81 = true;
+        compiled.PatternObject.MaximaAsBeforeD133 = true;
+    }
 
     /// <summary>
     /// Puts a row's question to this port with a partial result's groups restored by walking every
@@ -1836,6 +1888,17 @@ internal static class OracleComparer
     /// <remarks>
     /// <c>CallGuardComparesAcrossSections</c> is the one switch, read only by the guard. The
     /// <c>call-reentry-opening-a-section-is-refused</c> entry keys on this.
+    /// <para>
+    /// Since D133 a row of this family can need D133's switch as well: the deeper level the
+    /// re-entry runs passes a verb on an error its enclosing section cannot afford, and D133
+    /// refuses that error as it is made, so upstream's answer comes back only with both switches
+    /// off (<c>(?:a(*SKIP)|(?:a(?R)|b){2s+1d&lt;=2})</c> over 'b', the entry's first example: each
+    /// switch alone leaves this port's (0, 0), both give upstream's (1, 1)). The composed run is
+    /// handed to the entry only where D93's switch alone does not agree, D133's alone does not
+    /// either, and the two together move the answer, so each fix is shown to be needed, as the
+    /// D11 composition in the general <c>Run</c> does. The entry then judges it as it judges any
+    /// ablated answer, a change position upstream's own re-ask proves leaked included.
+    /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <returns>What this port answers without D93's exception, on the row's own deadline.</returns>
@@ -1843,12 +1906,35 @@ internal static class OracleComparer
     {
         ArgumentNullException.ThrowIfNull(row);
 
-        return Run(
+        TimeSpan timeout = row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout;
+        IOracleOutcome? alone = Run(
             row,
-            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            timeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.CallGuardComparesAcrossSections = true
         );
+        if (alone is null || Agrees(row, alone))
+        {
+            return alone;
+        }
+
+        IOracleOutcome? composed = Run(
+            row,
+            timeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.CallGuardComparesAcrossSections = true;
+                compiled.PatternObject.MaximaAsBeforeD133 = true;
+            }
+        );
+        bool d133Alone = Agrees(
+            row,
+            Run(row, timeout, lazy: false, ablate: static compiled => compiled.PatternObject.MaximaAsBeforeD133 = true)
+        );
+        bool movedByBoth =
+            composed is not null && !string.Equals(composed.Describe(), alone.Describe(), StringComparison.Ordinal);
+        return movedByBoth && !d133Alone ? composed : alone;
     }
 
     /// <summary>

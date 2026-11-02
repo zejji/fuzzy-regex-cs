@@ -1167,7 +1167,51 @@ internal sealed class PatternObject
     /// show that the D121 fix is the whole of a divergence. See
     /// <see cref="GuardList.PopFromKeepingSuccessMarks"/> and <c>docs/DIVERGENCES.md</c>.
     /// </summary>
-    internal bool UpstreamConditionalRestore;
+    internal bool UpstreamConditionalRestore
+    {
+        get => (_oracleSwitches & OracleSwitches.UpstreamConditionalRestore) != OracleSwitches.None;
+        set => SetOracleSwitch(OracleSwitches.UpstreamConditionalRestore, value);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether an error is permitted on the limits of
+    /// the section it is made in alone, as upstream's <c>this_error_permitted</c> decides, leaving
+    /// the sections around it to their own END_FUZZY (D133). The oracle sets it on a pattern it
+    /// compiled for an ablation, since upstream has none of this port's fixes. See
+    /// <c>Matcher.OneMoreErrorFitsTheOpenSections</c>.
+    /// </summary>
+    internal bool MaximaAsBeforeD133
+    {
+        get => (_oracleSwitches & OracleSwitches.MaximaAsBeforeD133) != OracleSwitches.None;
+        set => SetOracleSwitch(OracleSwitches.MaximaAsBeforeD133, value);
+    }
+
+    /// <summary>
+    /// The oracle-only switches <see cref="UpstreamConditionalRestore"/> and
+    /// <see cref="MaximaAsBeforeD133"/>, in one byte: a bool field of its own for D133 grew every
+    /// compiled pattern by 8 bytes (<c>AllocationTests</c>, 2026-11-02).
+    /// </summary>
+    private OracleSwitches _oracleSwitches;
+
+    /// <summary>Sets or clears one of <see cref="_oracleSwitches"/>.</summary>
+    /// <param name="flag">The switch.</param>
+    /// <param name="on">Whether it is on.</param>
+    private void SetOracleSwitch(OracleSwitches flag, bool on) =>
+        _oracleSwitches = on ? _oracleSwitches | flag : _oracleSwitches & ~flag;
+
+    /// <summary>The bits of <see cref="_oracleSwitches"/>.</summary>
+    [Flags]
+    private enum OracleSwitches : byte
+    {
+        /// <summary>No switch on.</summary>
+        None = 0,
+
+        /// <summary><see cref="UpstreamConditionalRestore"/>.</summary>
+        UpstreamConditionalRestore = 1,
+
+        /// <summary><see cref="MaximaAsBeforeD133"/>.</summary>
+        MaximaAsBeforeD133 = 2,
+    }
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a run-out answers without checking the

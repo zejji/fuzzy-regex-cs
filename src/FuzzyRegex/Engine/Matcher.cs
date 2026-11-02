@@ -5530,7 +5530,9 @@ internal static class Matcher
     /// backreference or a conditional reads shows (<see cref="ReadValue"/>: set or not, the text or
     /// the span); for each enclosing section, its node and how far it still is from each minimum,
     /// counting the errors of the sections inside it, which is all <see cref="RaisesUnmetMinimum"/>
-    /// and <see cref="AllMinimumsMet"/> read of it; the text the attempt has reached; and, as a
+    /// and <see cref="AllMinimumsMet"/> read of it, and (D133) the room left under each of its
+    /// limited maximums and the pass's limits, which <see cref="OneMoreErrorFitsTheOpenSections"/>
+    /// reads; the text the attempt has reached; and, as a
     /// set, the open calls the re-entry guard could refuse a call of the called group against.
     /// </para>
     /// <para>
@@ -5574,6 +5576,14 @@ internal static class Matcher
     /// <returns>The key, valid until the next call of this method.</returns>
     private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex)
     {
+        static void AddRoom(List<long> key, uint maximum, long count)
+        {
+            if (maximum != RegexFlags.Unlimited)
+            {
+                key.Add(maximum - count);
+            }
+        }
+
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
         List<long> key = state.CallMemoKey;
         key.Clear();
@@ -5616,6 +5626,32 @@ internal static class Matcher
                 key.Add(Math.Max(0, values[FuzzyValue.MinIns] - ins));
                 key.Add(Math.Max(0, values[FuzzyValue.MinDel] - del));
                 key.Add(Math.Max(0, values[FuzzyValue.MinErr] - (sub + ins + del)));
+
+                // NOT UPSTREAM (D133): an error inside the call is refused where it would break a
+                // maximum of this section or the whole match's limits (OneMoreErrorFitsTheOpenSections),
+                // so the room left under each limited one is part of the state. An unlimited one
+                // adds nothing, the same for every call the set compares.
+                long errors = sub + ins + del;
+                AddRoom(key, values[FuzzyValue.MaxSub], sub);
+                AddRoom(key, values[FuzzyValue.MaxIns], ins);
+                AddRoom(key, values[FuzzyValue.MaxDel], del);
+                AddRoom(key, values[FuzzyValue.MaxErr], errors);
+                FuzzyCountBuffer levelBuffer = default;
+                Span<long> level = levelBuffer;
+                level[FuzzyValue.Sub] = sub;
+                level[FuzzyValue.Ins] = ins;
+                level[FuzzyValue.Del] = del;
+                long cost = TotalCost(level, outer);
+                AddRoom(key, values[FuzzyValue.MaxCost], cost);
+                if (state.MaxErrors != long.MaxValue)
+                {
+                    key.Add(state.MaxErrors - errors);
+                }
+
+                if (state.MaxCost != long.MaxValue)
+                {
+                    key.Add(state.MaxCost - cost);
+                }
             }
         }
 
@@ -6796,8 +6832,9 @@ internal static class Matcher
     /// a continuation could complete. A minimum is not asked, because more text can still meet it.
     /// </para>
     /// <para>
-    /// Only the innermost section's limits are asked as each error is made
-    /// (<see cref="ThisErrorPermitted"/>), so only a pattern where sections nest can reach a broken
+    /// Upstream asks only the innermost section's limits as each error is made
+    /// (<see cref="ThisErrorPermitted"/>; this port has asked the sections around it too since D133,
+    /// <see cref="OneMoreErrorFitsTheOpenSections"/>), so only a pattern where sections nest can reach a broken
     /// one here (<see cref="PatternObject.NestsFuzzySections"/>); <see cref="CloseTheBodysSection"/>
     /// asks the same of a lookaround body's section that a run-out closes. `(?:(?:b){e&lt;=2}){i&lt;=1}x`
     /// over 'c' answered P(0, 1) with a substitution the outer <c>{i&lt;=1}</c> forbids, where the
@@ -6852,7 +6889,30 @@ internal static class Matcher
             return false;
         }
 
-        // The structure-stack depth the innermost open lookaround or condition's test parked, or -1.
+        FuzzyCountBuffer countsBuffer = default;
+        Span<long> counts = countsBuffer;
+        state.FuzzyCounts.CopyTo(counts);
+        return ASectionIsOverItsLimits(state, counts, section, StoppingBodyBase(state, pastPositiveTests));
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D81, D133): the structure-stack depth the innermost open construct that stops
+    /// a walk out along the open fuzzy sections parked, or -1 when none is open. A section whose frame
+    /// lies above it was opened inside that construct's body.
+    /// </summary>
+    /// <remarks>
+    /// The walk goes past an atomic group and a positive lookaround's body, whose errors count
+    /// against the sections around them (D130), and past a positive condition test when
+    /// <paramref name="pastPositiveTests"/> is set (D132). It stops at a negative lookaround's body,
+    /// whose errors are dropped, and at any other condition test. See
+    /// <see cref="AnOpenSectionIsOverItsLimits"/> for the argument and the witnesses. Cost: one step
+    /// per open pruning mark above the stopping one; the walk only moves down the stack, so it ends.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pastPositiveTests">Whether the walk goes on past a positive condition test.</param>
+    /// <returns>The depth, or -1.</returns>
+    private static long StoppingBodyBase(MatchState state, bool pastPositiveTests)
+    {
         long bodyBase = -1;
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
@@ -6867,24 +6927,32 @@ internal static class Matcher
                 // D130: a positive lookaround's body hands its errors out to the sections around
                 // it, so its run-out answers to them as well, and the scan goes on outward. D132: so
                 // does a positive condition test's, for the run-out insertion's check.
-                Debug.Assert(
-                    (Opcode)code != Opcode.Conditional || state.PartialSide != MatchState.PartialNone,
-                    "D132: a run-out reads a condition's parked node, which only a partial call parks"
-                );
-                if (
-                    ((Opcode)code == Opcode.Lookaround || (pastPositiveTests && (Opcode)code == Opcode.Conditional))
-                    && ReadPruningMark(state, mark, out _, out LookaroundStateData look)
-                    && look.Node is { Match: true }
-                )
+                if ((Opcode)code == Opcode.Lookaround || (pastPositiveTests && (Opcode)code == Opcode.Conditional))
                 {
-                    continue;
+                    Debug.Assert(
+                        (Opcode)code != Opcode.Conditional || state.PartialSide != MatchState.PartialNone,
+                        "D132: a run-out reads a condition's parked node, which only a partial call parks"
+                    );
+                    if (
+                        ReadPruningMark(state, mark, out _, out LookaroundStateData look)
+                        && look.Node is { Match: true }
+                    )
+                    {
+                        continue;
+                    }
                 }
 
+                // LOOKAROUND and CONDITIONAL both push the structure-stack depth just below their
+                // opcode byte (AdvanceLookaround, AdvanceConditional), in every kind of call.
                 if (!state.Bstack.ReadSizeBelow(mark - 1, out bodyBase))
                 {
                     bodyBase = -1;
                 }
 
+                Debug.Assert(
+                    bodyBase <= state.Sstack.Count,
+                    "D133: a lookaround or condition parks a structure-stack depth the stack still holds"
+                );
                 break;
             }
 
@@ -6894,9 +6962,22 @@ internal static class Matcher
             }
         }
 
-        FuzzyCountBuffer countsBuffer = default;
-        Span<long> counts = countsBuffer;
-        state.FuzzyCounts.CopyTo(counts);
+        return bodyBase;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D81, D133): whether <paramref name="counts"/>, the counts of the open
+    /// section <paramref name="section"/>, break one of its maximums or one of a section around it,
+    /// each counting the errors of the sections inside it, or the whole match's error or cost limit.
+    /// Only the sections opened above <paramref name="bodyBase"/> are asked.
+    /// </summary>
+    /// <param name="state">The match state, which keeps the section links.</param>
+    /// <param name="counts">The open section's counts; overwritten with the outermost asked.</param>
+    /// <param name="section">The open section, <see cref="MatchState.FuzzyNode"/>.</param>
+    /// <param name="bodyBase">What <see cref="StoppingBodyBase"/> returned.</param>
+    /// <returns><see langword="true"/> if some asked section's upper limit is broken.</returns>
+    private static bool ASectionIsOverItsLimits(MatchState state, Span<long> counts, Node section, long bodyBase)
+    {
         FuzzyCountBuffer outerCountsBuffer = default;
         Span<long> outerCounts = outerCountsBuffer;
         int frame = state.SectionFrame;
@@ -6922,6 +7003,81 @@ internal static class Matcher
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D133): whether one more error of <paramref name="fuzzyType"/> fits the
+    /// maximums of every open fuzzy section that will count it, the one in force
+    /// (<see cref="MatchState.FuzzyNode"/>) and each one around it, and the whole match's limits.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream asks only the section in force (<see cref="ThisErrorPermitted"/>,
+    /// <see cref="InsertionPermitted"/>); a section around it checks its maximums only at its own
+    /// END_FUZZY, which adds the inner counts to its own (<c>upstream/src/_regex.c</c>:12475-12481). A
+    /// committing construct between the two (an atomic group, a possessive repeat, <c>(*PRUNE)</c>)
+    /// then commits to an error the outer section forbids, and the match fails where a path within
+    /// every limit exists: <c>(?:(?&gt;(?:ab){e&lt;=1})){d&lt;=1}</c> over 'bb' was None, in upstream
+    /// too, where deleting the 'a' fits both sections.
+    /// </para>
+    /// <para>
+    /// Model E asks every maximum when the error is made, with the counts each section will hold
+    /// once the sections inside it close: its count when the inner section was entered
+    /// (<see cref="MatchState.TryOuterSection"/>) plus the inner section's, plus this error. Counts
+    /// only grow along a path and no cost weight is negative, so an error refused here is one some
+    /// END_FUZZY fails on every continuation; where nothing commits, the answer is the same. The
+    /// walk follows the run-time section links, so a section a group call enters is asked from the
+    /// section the call was made in, and it stops where <see cref="AnOpenSectionIsOverItsLimits"/>
+    /// stops for a plain run-out (<see cref="StoppingBodyBase"/>): past atomic groups and positive
+    /// lookaround bodies, at a negative lookaround's body and at every condition test. Minimums are
+    /// still asked only at END_FUZZY, since more text can meet them.
+    /// </para>
+    /// <para>
+    /// Asked only for a pattern whose sections nest (<see cref="PatternObject.NestsFuzzySections"/>);
+    /// any other pays that flag's test. Kept out of line so that its locals stay out of its callers'
+    /// frames.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="fuzzyType">The kind of error about to be made.</param>
+    /// <param name="sectionAsked">
+    /// Whether the caller has already asked the section in force, so that only the sections around
+    /// it are left. <see langword="false"/> at END_FUZZY's trailing insertion, where the section in
+    /// force is the one around the section just closed.
+    /// </param>
+    /// <returns><see langword="true"/> if the error fits every section that will count it.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool OneMoreErrorFitsTheOpenSections(MatchState state, int fuzzyType, bool sectionAsked)
+    {
+        Debug.Assert(state.Pattern.NestsFuzzySections, "D133: asked only where sections nest");
+        Debug.Assert(state.Pattern.KeepsSectionLinks, "D133: a pattern whose sections nest keeps their links");
+        if (state.Pattern.MaximaAsBeforeD133 || state.FuzzyNode is not { } section)
+        {
+            return true;
+        }
+
+        // The section in force has its frame on the structure stack (AdvanceFuzzy sets the two
+        // together; END_FUZZY and its backtrack arm restore them together).
+        Debug.Assert(
+            state.SectionFrame <= state.Sstack.Count,
+            "D133: the open section's frame lies on the structure stack"
+        );
+
+        FuzzyCountBuffer countsBuffer = default;
+        Span<long> counts = countsBuffer;
+        if (sectionAsked)
+        {
+            // Nothing around the section in force: the caller's own check was the whole of it.
+            int probe = state.SectionFrame;
+            if (state.TryOuterSection(ref probe, counts) is null)
+            {
+                return true;
+            }
+        }
+
+        state.FuzzyCounts.CopyTo(counts);
+        ++counts[fuzzyType];
+        return !ASectionIsOverItsLimits(state, counts, section, StoppingBodyBase(state, pastPositiveTests: false));
     }
 
     /// <summary>
@@ -9356,6 +9512,12 @@ internal static class Matcher
     /// The last conjunct is <see cref="MatchState.MaxCost"/>, upstream's own until 2015.11.5:
     /// <c>state-&gt;total_cost + values[RE_FUZZY_VAL_COST_BASE + fuzzy_type] &lt;=
     /// state-&gt;max_cost</c>, <c>_regex.c:9936</c> in release 2015.09.28.
+    /// <para>
+    /// The last conjunct is NOT UPSTREAM'S (D133): where sections nest, the error must also fit
+    /// every section around this one (<see cref="OneMoreErrorFitsTheOpenSections"/>). Every caller
+    /// asks this as the error is made or as the frame that will make it is pushed, which the
+    /// backtrack restores to the same counts and sections.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="fuzzyType">The error being tried.</param>
@@ -9372,7 +9534,11 @@ internal static class Matcher
             && errorCount < values[FuzzyValue.MaxErr]
             && errorCount < state.MaxErrors
             && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost]
-            && cost + values[FuzzyValue.CostBase + fuzzyType] <= state.MaxCost;
+            && cost + values[FuzzyValue.CostBase + fuzzyType] <= state.MaxCost
+            && (
+                !state.Pattern.NestsFuzzySections
+                || OneMoreErrorFitsTheOpenSections(state, fuzzyType, sectionAsked: true)
+            );
     }
 
     /// <summary>Upstream <c>insertion_permitted</c> (line 9695).</summary>
@@ -9938,6 +10104,9 @@ internal static class Matcher
     /// ablation of the same order defect at a section's end (ledger entry 51), and under
     /// <see cref="PatternObject.SkipExactDeletionRetry"/>, since the insertion rides the frame
     /// ledger entry 42 added and its retry goes on to that entry's deletion.
+    /// <see cref="ThisErrorPermitted"/> asks every section around the open one too (D133), which
+    /// this used to ask separately: row A of <c>FailedCallMemoTests</c>, whose outer section takes
+    /// no insertion, went past its step bound without that.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if it should.</returns>
@@ -9947,7 +10116,6 @@ internal static class Matcher
         && !state.Pattern.SkipExactDeletionRetry
         && ThisErrorPermitted(state, FuzzyValue.Ins)
         && !AllMinimumsMet(state)
-        && EnclosingSectionsAdmitAnInsertion(state)
         && ASubstitutionMayFollow(state);
 
     /// <summary>
@@ -10351,48 +10519,6 @@ internal static class Matcher
         }
 
         return [.. tests];
-    }
-
-    /// <summary>
-    /// NOT UPSTREAM (D94): whether every section around the current one can take one more insertion
-    /// and one more error, as each will count it once the sections inside it close.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ThisErrorPermitted"/> asks only the current section. Where an enclosing one
-    /// permits no insertion, an insertion leads only to its own <c>END_FUZZY</c> failing, after a
-    /// search of everything in between: row A of <c>FailedCallMemoTests</c>, whose outer section
-    /// takes no insertion, went past its step bound without this check.
-    /// See <see cref="InsertionsCanMeetMinimum"/>, which asks the same of trailing insertions.
-    /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <returns><see langword="true"/> if they can.</returns>
-    private static bool EnclosingSectionsAdmitAnInsertion(MatchState state)
-    {
-        int frame = state.SectionFrame;
-        if (frame < 0)
-        {
-            return true;
-        }
-
-        long[] counts = state.FuzzyCounts;
-        long ins = counts[FuzzyValue.Ins] + 1;
-        long errors = TotalErrors(counts) + 1;
-        FuzzyCountBuffer outerCountsBuffer = default;
-        Span<long> outerCounts = outerCountsBuffer;
-
-        // Ends: MatchState.TryOuterSection only steps to a lower frame.
-        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
-        {
-            ins += outerCounts[FuzzyValue.Ins];
-            errors += outerCounts[FuzzyValue.Sub] + outerCounts[FuzzyValue.Ins] + outerCounts[FuzzyValue.Del];
-            uint[] values = outer.Values;
-            if (ins > values[FuzzyValue.MaxIns] || errors > values[FuzzyValue.MaxErr])
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -11768,7 +11894,15 @@ internal static class Matcher
     {
         int limit = step > 0 ? state.SliceEnd : state.SliceStart;
 
-        if (state.TextPos == limit || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts))
+        // NOT UPSTREAM (D133): the last test, see OneMoreErrorFitsTheOpenSections.
+        if (
+            state.TextPos == limit
+            || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts)
+            || (
+                state.Pattern.NestsFuzzySections
+                && !OneMoreErrorFitsTheOpenSections(state, FuzzyValue.Ins, sectionAsked: true)
+            )
+        )
         {
             return;
         }
@@ -11804,9 +11938,14 @@ internal static class Matcher
 
         int limit = step > 0 ? state.SliceEnd : state.SliceStart;
 
+        // NOT UPSTREAM (D133): the third test, see OneMoreErrorFitsTheOpenSections.
         if (
             state.TextPos == limit
             || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts)
+            || (
+                state.Pattern.NestsFuzzySections
+                && !OneMoreErrorFitsTheOpenSections(state, FuzzyValue.Ins, sectionAsked: true)
+            )
             || !FuzzyExtMatch(state, state.FuzzyNode, state.TextPos)
         )
         {
@@ -18755,6 +18894,11 @@ internal static class Matcher
         // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on
         // - a HANG rather than a wrong answer, so the test bounds it with a MatchTimeout
         // rather than asserting a value.
+        //
+        // The fifth test is NOT UPSTREAM'S (D133): the insertion counts against the sections
+        // around the one just closed too. The forward arm left the one around it in force, with
+        // the merged counts and its own frame (AdvanceEndFuzzy), so that is where the walk starts,
+        // and that section has not been asked yet. See OneMoreErrorFitsTheOpenSections.
         if (
             !trailingInsertionRanOut
             && InsertionPermitted(state, innerNode!, innerCounts)
@@ -18762,6 +18906,10 @@ internal static class Matcher
                 + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
                 < state.MaxErrors
             && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost] <= state.MaxCost
+            && (
+                !pattern.NestsFuzzySections
+                || OneMoreErrorFitsTheOpenSections(state, FuzzyValue.Ins, sectionAsked: false)
+            )
         )
         {
             bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;

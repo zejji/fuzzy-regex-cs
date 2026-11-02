@@ -71,7 +71,9 @@ public sealed class NamedAblationLabelTests
             OracleRow row = recorded with { DefaultVersion = (int)FuzzyRegexOptions.Version0 };
             IOracleOutcome? ours = OracleComparer.Run(row);
 
-            // The controls: the row diverges, and the D81 switch alone gives upstream's answer.
+            // The controls: the row diverges, and the switches of the enclosing sections' limit
+            // checks alone give upstream's answer: since D133, D81's and D133's together, as D133
+            // refuses, as it is made, the error each row's run-out followed.
             OracleComparer.Compare(row, ours).Should().NotBe(OracleVerdict.Agree, row.Pattern);
             OracleComparer
                 .Compare(
@@ -79,15 +81,20 @@ public sealed class NamedAblationLabelTests
                     OracleComparer.Run(
                         row,
                         OracleComparer.RowTimeout,
-                        ablate: static c => c.PatternObject.RunOutAsBeforeD81 = true,
+                        ablate: OracleComparer.WithoutTheEnclosingLimitChecks,
                         composeWithD11: false
                     )
                 )
                 .Should()
-                .Be(OracleVerdict.Agree, "the D81 switch alone explains {0} over '{1}'", row.Pattern, row.Subject);
+                .Be(
+                    OracleVerdict.Agree,
+                    "the D81 and D133 switches alone explain {0} over '{1}'",
+                    row.Pattern,
+                    row.Subject
+                );
 
             // Ledger entry 81 has no entry of its own: its rows are judged by hand. So a named
-            // ablation that claims one claims it only through the D81 switch it stacks.
+            // ablation that claims one claims it only through the switches it stacks.
             (ExpectedDivergences.For(row, ours!)?.Id)
                 .Should()
                 .BeNull("{0} over '{1}' is ledger entry 81's alone", row.Pattern, row.Subject);

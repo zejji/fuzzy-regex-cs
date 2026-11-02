@@ -94,9 +94,10 @@ public sealed class PartialContractTests
     /// and a partial at the edge, or None, on the searches.
     /// </summary>
     /// <remarks>
-    /// <c>ba(*FAIL)</c> and <c>(?:a\B)+</c> are the plain cases. In the fuzzy search at start 2 the
-    /// outer section spends its one error on 'y', and the lookahead's body and the tail's
-    /// <c>(b|c)</c> then run out, each presumed to match, though each needs another error. After
+    /// <c>ba(*FAIL)</c> and <c>(?:a\B)+</c> are the plain cases. The fuzzy search answered at
+    /// start 2 until D133, where the outer section spent its one error on 'y' and the lookahead's
+    /// body and the tail's <c>(b|c)</c> then ran out, each presumed to match, though each needed
+    /// another error; it now answers the genuine partial at 0 (see the row's comment). After
     /// 'a' or '\r' at the edge a combining mark or a line feed can extend the cluster, so
     /// <c>\X</c>'s closing test takes the next character and the rest is presumed; a trailing
     /// insertion runs out the same way. Inside a lookahead's body the repeat's run-out leaves the
@@ -112,7 +113,10 @@ public sealed class PartialContractTests
     [Arguments("match", @"ba(*FAIL)", "b", 0, 1)]
     [Arguments("search", @"ba(*FAIL)", "b", 0, 1)]
     [Arguments("fullmatch", @"(?:a\B)+", "a", 0, 1)]
-    [Arguments("search", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", "aby", 2, 3)]
+    // Since D133 the search answers at 0, a partial that 'abyx' completes (the body's second
+    // error is refused, so the lookahead takes its b branch; PartialLookaroundRuleTests); before
+    // D133 the body committed to a path the outer section fails, and the search went on to 2.
+    [Arguments("search", @"(?:a(?=(?:(?:bcd){1<=e<=2}|b))(?:b|c){1<=e<=1}x){0<=e<=1}", "aby", 0, 3)]
     [Arguments("search", @"(?:\X){d<=1}(*FAIL)|c", "a", 0, 1)]
     [Arguments("search", @"\X(*FAIL)|c", "a", 0, 1)]
     [Arguments("match", @"\X(*FAIL)|c", "a", 0, 1)]
