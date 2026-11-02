@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-02 07:10 by Claude Code (items 1-12 merged; paused for the owner's 07:40 stop).
+**Updated:** 2026-11-02 21:25 by Claude Code (overnight: item 13's full BDN in the 23:30-04:30 window; CHANGELOG).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -38,11 +38,16 @@ pushes need the owner.
 
 ## In flight
 
-- Nothing running. Main (a4337797 or later; code as of e23ee6eb): items 1-12 gated (ratchet, inspection, oracle 7/4242). Not pushed.
-- Deferred in the night: D134 (atomic around a recorded lookahead), D135 (D122 compile allocation, 1.3), D136 (condition tests under D133's rule).
-- Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
-- Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
+- Item 13 BDN: runner `.scratch/s1024/bdn-v120.ps1` (pwsh PID 30892), log `.scratch/s1024/bdn-v120.log`,
+  artifacts `.scratch/s1024/bdn-v120/`. Waits for 23:31, then whole suite `--job medium`, pinned, three passes:
+  v1.1.0 (worktree v110), main de4bbc84 (v120), 2373e273 (d82base, D82's baseline). Quiet window agreed
+  with peer s06c-51 (future-ide) 23:30-04:30; send it the end message when done. Then compare with
+  `tools/compare-benchmarks.ps1` (model: `.scratch/s1024/bdn-v110-compare.ps1`) and write the note in `bench/baselines/`.
+- Guards running: watchdog.ps1 PID 51816, jbguard.ps1 PID 18468.
+- Main de4bbc84 equals origin/main (owner pushed 2026-11-02).
+- Deferred: D134 (atomic around a recorded lookahead), D135 (D122 compile allocation, 1.3), D136 (condition tests under D133's rule).
+- Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
 
-## Waiting on the owner: a push of main, and a timing window for item 13's full BDN vs 1.1.0.
+## Waiting on the owner: nothing (window granted 2026-11-02; release stops at ready-not-tagged).
 
 **Next action:** item 13: CHANGELOG and release notes for 1.2 (F115-F124) can start now; full BDN vs 1.1.0 incl. D82's rows in the owner's timing window; `docs/RELEASING.md`.
