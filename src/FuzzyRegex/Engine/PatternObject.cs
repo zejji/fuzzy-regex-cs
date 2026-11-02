@@ -2698,6 +2698,27 @@ internal sealed class PatternObject
             }
         }
 
+        // NOT UPSTREAM (D122): see CutBodyFacts.ContinuationOpenGroups. A pattern with no capture
+        // group has none open anywhere, so it skips the walk and its compile allocates what it did
+        // before (AllocationTests).
+        if (
+            pattern.TrueGroupCount > 0
+            && pattern.CutBodies is { ContinuationKeyRepeats: int[] keyedRepeats } keyedFacts
+        )
+        {
+            Dictionary<object, int[]> enclosing = TailGuardLiveness.EnclosingGroups(pattern);
+            keyedFacts.ContinuationOpenGroups = new int[keyedRepeats.Length];
+            for (int i = 0; i < keyedRepeats.Length; i++)
+            {
+                if (keyedRepeats[i] >= 0)
+                {
+                    int open = enclosing.TryGetValue(pattern.NodeList[i], out int[]? groups) ? groups.Length : 0;
+                    keyedFacts.ContinuationOpenGroups[i] = open;
+                    keyedFacts.MaxContinuationOpenGroups = Math.Max(keyedFacts.MaxContinuationOpenGroups, open);
+                }
+            }
+        }
+
         // A call is stepped over (D97): its return restores every capture, so it adds no group.
         if (pattern.ReadsCapturesWhileMatching)
         {
@@ -3152,6 +3173,17 @@ internal sealed class CutBodyFacts(int repeats)
     /// <c>PatternObject.SetLookaroundBodies</c>.
     /// </summary>
     internal int[]? ContinuationKeyRepeats;
+
+    /// <summary>
+    /// NOT UPSTREAM (D122): by node index, for a lookaround keyed in <see cref="ContinuationKeyRepeats"/>,
+    /// how many capture groups are open around it, so how many parked starts sit below its parked
+    /// state on the save stack when it ends (<c>MatchState.ContinuationKeyOf</c>); <see langword="null"/>
+    /// when no lookaround is keyed or the pattern has no capture group (none open anywhere). Set by <c>PatternObject.SetLookaroundBodies</c>.
+    /// </summary>
+    internal int[]? ContinuationOpenGroups;
+
+    /// <summary>NOT UPSTREAM (D122): the largest of <see cref="ContinuationOpenGroups"/>, the parked-start slots a continuation key has.</summary>
+    internal int MaxContinuationOpenGroups;
 }
 
 /// <summary>

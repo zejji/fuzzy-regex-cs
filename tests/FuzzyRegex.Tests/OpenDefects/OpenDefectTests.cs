@@ -17,16 +17,21 @@ namespace Fuzzy.Text.RegularExpressions.Tests.OpenDefects;
 [Explicit]
 public sealed class OpenDefectTests
 {
-    // D122. Group 2 always takes part, so the conditional needs a 'c' after the last 'a' the
-    // repeat takes, and no text after 'a' * 9 + 'b' puts one there: the 'b' is fixed. The anchored
-    // calls have no completion, and the search's leftmost completable start is the edge. The port
-    // forks until the budget stops it and answers the partial at the start; upstream 2026.9.29
-    // answers (0, 10) as well. The expected answers are argued, and the port with every repeat
-    // guard and the fork budget off gives the search's (10, 10) (blind review, 2026-10-20).
+    // D134 (found 2026-11-02 by the D122 blind review). D122's shape with the lookahead inside an
+    // atomic group: the continuation memo is still refused while a pruning mark is open, so the
+    // pass forks until the budget stops it and answers the partial at the attempt's start. The
+    // argument for the expected answers is D122's (PartialContinuationMemoTests): group 2 always
+    // takes part, so the last 'a' the loop takes needs a 'c' after it, and no continuation puts one
+    // inside 'a' * 9 + 'b'. The grid's judge (upstream non-partial over every continuation up to 3
+    // characters of 'abcdx') agrees: match None, search P(10, 10). The port answers (0, 10) partial
+    // to both, as at n = 9 without the atomic group before D122's fix; at n <= 5 it is right.
+    // Upstream 2026.9.29 answers (0, 10) partial.
     [Test]
-    public void A_group_open_around_a_recorded_lookahead_still_answers_the_budget_partial()
+    [Arguments(@"((?>(?=(?:ab|a)*(b?)a?)a))+(?(2)c|d)")]
+    [Arguments(@"(?>((?=(?:ab|a)*(b?)a?)a))+(?(2)c|d)")]
+    public void An_atomic_group_around_a_recorded_lookahead_still_answers_the_budget_partial(string pattern)
     {
-        var regex = new FuzzyRegex(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)");
+        var regex = new FuzzyRegex(pattern);
         string subject = new string('a', 9) + "b";
 
         regex.MatchAtStart(subject, partial: true).Success.Should().BeFalse();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -42,6 +43,7 @@ public sealed class PartialContinuationMemoTests
     [Arguments(@"y?(?:(?=(?:ab|a)*(b?)a?)a)*(?(1)c|d)", "aaaaaaaaab", 10, 10)]
     [Arguments(@"y?(?:(?=(?:ab|a)*(b?)a?)a)+(?(1)c|d)", "aaaaaaaaab", 10, 10)]
     [Arguments(@"y?(?:(?=(?:ab|a)*(b?)a?)a){2,}(?(1)c|d)", "aaaaaaaaab", 10, 10)]
+    [Arguments(@"(?:(?=(?:ab|a)*(b?)a?)(a))+(?(1)c|d)", "aaaaaaaaab", 10, 10)] // a group after it, not open around it (D122)
     public void A_lookahead_whose_real_success_discards_its_records_keeps_the_exact_partial(
         string pattern,
         string subject,
@@ -56,6 +58,63 @@ public sealed class PartialContinuationMemoTests
         (m.Index, m.Index + m.Length)
             .Should()
             .Be((start, end), "the fork budget's partial at the attempt start is the D104 phantom");
+    }
+
+    /// <summary>
+    /// D122: the same shape with a capture group open around the lookahead, in every placement the
+    /// 2026-10-31 grid found (<c>.scratch/s1024/d122</c>): closing after the 'a' or straight after
+    /// the lookahead, nested, with <c>*</c>, <c>{2,}</c>, a lazy <c>+?</c>, an <c>a*</c> or a
+    /// <c>b?</c> prefix, at 50 characters as at 9, and the review's W3, which opens the group before
+    /// a variable prefix. The group's start sat on the save stack outside the key, so the memo was
+    /// off, the pass forked until the budget stopped it, and every row answered the budget's partial
+    /// from the attempt's start (moved from <c>OpenDefectTests</c>). The key now holds the start.
+    /// </summary>
+    /// <remarks>
+    /// The expected answers are argued, and hold for every n: q always takes part, so the last 'a'
+    /// the loop takes must be followed by a 'c', and every position the loop can stop at inside
+    /// 'a' * n + 'b' holds an 'a' or the 'b'. So no anchored call has a completion, and the search's
+    /// least completable start is the edge (text to come 'ac'), or the 'b' when <c>b?</c> can take
+    /// it. A zero-iteration <c>*</c> needs a 'd' where the text has an 'a', so it adds no start. The
+    /// grid's brute-force judge agrees, as does the port with every guard and the fork budget off.
+    /// Upstream 2026.9.29 answers (0, n + 1) partial on every row and on the no-group controls too.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="n">How many 'a's come before the 'b'.</param>
+    /// <param name="searchStart">The search's expected partial start; it ends at the edge.</param>
+    [Test]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 9, 10)]
+    [Arguments(@"((?=(?:ab|a)*(?P<q>b?)a?)a)*(?(q)c|d)", 9, 10)]
+    [Arguments(@"((?=(?:ab|a)*(?P<q>b?)a?)a){2,}(?(q)c|d)", 9, 10)]
+    [Arguments(@"((?=(?:ab|a)*(?P<q>b?)a?)a)+?(?(q)c|d)", 9, 10)]
+    [Arguments(@"(?:((?=(?:ab|a)*(?P<q>b?)a?))a)+(?(q)c|d)", 9, 10)]
+    [Arguments(@"(?:((?=(?:ab|a)*(?P<q>b?)a?)a))+(?(q)c|d)", 9, 10)]
+    [Arguments(@"(((?=(?:ab|a)*(?P<q>b?)a?)a))+(?(q)c|d)", 9, 10)]
+    [Arguments(@"(a?(?=(?:ab|a)*(?P<q>b?)a?)a)+(?(q)c|d)", 9, 10)]
+    [Arguments(@"a*((?=(?:ab|a)*(?P<q>b?)a?)a)+(?(q)c|d)", 9, 10)]
+    [Arguments(@"b?((?=(?:ab|a)*(?P<q>b?)a?)a)+(?(q)c|d)", 9, 9)]
+    [Arguments(@"((?=(?:ab|a)*(?P<q>b?)a?)a)+(?(q)c|d)", 50, 51)]
+    [Arguments(@"b?(?:((?=(?:ab|a)*(?P<q>b?)a?)a))*(?(q)c|d)", 9, 9)]
+    [Arguments(@"a*(?:((?=(?:ab|a)*(?P<q>b?)a?)a)){2,}(?(q)c|d)", 9, 10)]
+    [Arguments(@"b?(((?=(?:ab|a)*(?P<q>b?)a?)a)){2,}(?(q)c|d)", 9, 9)]
+    [Arguments(@"a*(((?=(?:ab|a)*(?P<q>b?)a?)a))*(?(q)c|d)", 9, 10)]
+    [Arguments(@"b?(a?(?=(?:ab|a)*(?P<q>b?)a?)a)*(?(q)c|d)", 9, 9)]
+    [Arguments(@"a*(a?(?=(?:ab|a)*(?P<q>b?)a?)a){2,}(?(q)c|d)", 9, 10)]
+    [Arguments(@"a*(a*(?:(?=(?:ab|a)*(?P<q>b?)a?)a)+)(?(q)c|d)", 9, 10)] // review W3: opens before a variable prefix
+    [Arguments(@"(?|((?=(?:ab|a)*(b?)a?)a)|x)+(?(2)c|d)", 9, 10)] // blind review: branch reset around the group
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?=(?:ab|a)*b?a?)a*(?(2)c|d)", 9, 10)] // two keyed lookaheads, one with no group open
+    [Arguments(@"(a(?=(?:ab|a)*(b?)a?)(?:a|ab))+(?(2)c|d)", 9, 1)] // the lookahead's body ends again after a retry; right without the fix too
+    public void A_group_open_around_the_lookahead_keys_its_start_and_keeps_the_exact_partial(
+        string pattern,
+        int n,
+        int searchStart
+    )
+    {
+        var regex = new FuzzyRegex(pattern);
+        string subject = new string('a', n) + "b";
+
+        regex.MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+        Match m = regex.Match(subject, partial: true);
+        (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, searchStart, n + 1));
     }
 
     /// <summary>
@@ -80,6 +139,59 @@ public sealed class PartialContinuationMemoTests
             300_000,
             "each continuation fails once per pass"
         );
+    }
+
+    /// <summary>
+    /// D122: with a group open around the lookahead, the same order of work as without one, as the
+    /// group's start is the lookahead's position, already in the key. 109,250 steps (Debug,
+    /// 2026-11-01), against 102,173 without the group; before D122 the memo was off and the pass
+    /// ran to the budget, 444,157 steps for the phantom (0, 51).
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_group_open_around_the_lookahead_keeps_the_real_success_shape_polynomial()
+    {
+        var regex = new FuzzyRegex(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = new string('a', 50) + "b";
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+            {
+                Match m = regex.Match(subject, partial: true);
+
+                (m.PartialMatch, m.Index, m.Length).Should().Be((true, 51, 0));
+            },
+            150_000,
+            "each continuation fails once per pass, keyed by the group's start"
+        );
+    }
+
+    /// <summary>
+    /// D122, the review's cap question: the key that holds a group's start multiplies the keys
+    /// where the start can take many values, as in W3, whose group opens before an <c>a*</c>, and
+    /// the keys share <c>MatchState.CutBodyKeyCap</c> with the repeat records. At 20 characters W3
+    /// peaks at 962 keys in 373,465 steps; at 64, 8,706 keys (13% of the cap) and no write skipped,
+    /// in 38,658,877 steps against 35,569,057 for the phantom before (Debug, 2026-11-01). No write
+    /// must be skipped here, or the cap is crowding out records (the peak is in
+    /// <c>WorkCounter.CutBodyKeysPeak</c>, a per-thread maximum, so it is measured by probe, not here).
+    /// Without the fix no key is written at all, so only the answer can go red then.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_group_opened_before_a_variable_prefix_stays_far_below_the_key_cap()
+    {
+        EngineWork.SkipUnlessCounting();
+        var regex = new FuzzyRegex(
+            @"a*(a*(?:(?=(?:ab|a)*(b?)a?)a)+)(?(2)c|d)",
+            FuzzyRegexOptions.None,
+            EngineWork.HangGuard
+        );
+        long skippedBefore = WorkCounter.CutBodyWritesSkipped;
+
+        Match m = regex.Match(new string('a', 20) + "b", partial: true);
+
+        (m.PartialMatch, m.Index, m.Length).Should().Be((true, 21, 0));
+        (WorkCounter.CutBodyWritesSkipped - skippedBefore).Should().Be(0);
     }
 
     /// <summary>
@@ -135,29 +247,71 @@ public sealed class PartialContinuationMemoTests
     }
 
     /// <summary>
-    /// No continuation key where a group is open around the lookahead. Group 1 opens before the
-    /// lookahead, so its start is on the save stack, not in the key, and the outer <c>a*</c>
-    /// giving back one character at a time reaches the lookahead again at 2 with a longer group.
-    /// With the rule taken out (<c>savedBelow != 0</c> in <c>ContinuationKeyOf</c>), the earlier
-    /// recorded failure is replayed, <c>\1</c> is never tried against (0,3), and the rows answer as
-    /// in the comment (36 of 90 such rows wrong, measured 2026-10-20). Upstream 2026.9.29 has the
-    /// same spans and leaves group 1 unset; see DIVERGENCES, "A partial match reports a group
-    /// that closes before a repeat's tail runs out of text".
+    /// A group open around the lookahead keys its parked start (D122). Group 1 opens before the
+    /// lookahead, so its start is on the save stack, and the outer <c>a*</c> giving back one
+    /// character at a time reaches the lookahead again at 2 with a longer group. Before D122 the
+    /// memo was off here. With the start left out of the key (the memo on and no start, measured
+    /// 2026-10-20 and again 2026-11-01), the earlier recorded failure is replayed, <c>\1</c> is
+    /// never tried against (0,3), and the rows answer as in the comment. Upstream 2026.9.29 has the
+    /// same spans and leaves group 1 unset; see DIVERGENCES, "A partial match reports a group that
+    /// closes before a repeat's tail runs out of text".
     /// </summary>
+    /// <remarks>
+    /// The nested rows put groups between group 1 and the lookahead. The key borrowed from the
+    /// lookahead's repeat reads group 1's save-stack slot counted from the top (the D104 review's
+    /// point 3); with six groups in between that read lands on a parked start below the
+    /// lookahead's parked state, which must still key the arrivals apart. Expected answers are the
+    /// port's with the memo off where a group is open (before D122), which these small rows reach
+    /// within the budget. So these rows pass with the fix reverted too (the memo is then off): they
+    /// guard against a key too coarse, not for the fix; the rows above go red without it.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
     /// <param name="subject">The subject.</param>
     /// <param name="operation">search or match.</param>
     /// <param name="expected">The guards-off answer.</param>
     [Test]
-    [Arguments("aabaa", "search", "(0,5)p g1=(0,3)")] // (3,5)p g1=
-    [Arguments("aabaa", "match", "(0,5)p g1=(0,3)")] // None
-    [Arguments("aaabaa", "search", "(0,6)p g1=(1,4)")] // (4,6)p g1=
-    public void A_group_open_around_the_lookahead_keeps_its_continuation_unrecorded(
+    [Arguments(@"a*(a*(?=(?:a|b)*)b)\1", "aabaa", "search", "(0,5)p g1=(0,3)")] // (3,5)p g1=
+    [Arguments(@"a*(a*(?=(?:a|b)*)b)\1", "aabaa", "match", "(0,5)p g1=(0,3)")] // None
+    [Arguments(@"a*(a*(?=(?:a|b)*)b)\1", "aaabaa", "search", "(0,6)p g1=(1,4)")] // (4,6)p g1=
+    [Arguments(
+        @"a*(a*(((((((?=(?:a|b)*)))))))b)\1",
+        "aabaa",
+        "search",
+        "(0,5)p g1=(0,3) g2=(2,2) g3=(2,2) g4=(2,2) g5=(2,2) g6=(2,2) g7=(2,2)"
+    )]
+    [Arguments(
+        @"a*(a*(((((((?=(?:a|b)*)))))))b)\1",
+        "aabaa",
+        "match",
+        "(0,5)p g1=(0,3) g2=(2,2) g3=(2,2) g4=(2,2) g5=(2,2) g6=(2,2) g7=(2,2)"
+    )]
+    [Arguments(
+        @"a*(a*(((((((?=(?:a|b)*)))))))b)\1",
+        "aaabaa",
+        "search",
+        "(0,6)p g1=(1,4) g2=(3,3) g3=(3,3) g4=(3,3) g5=(3,3) g6=(3,3) g7=(3,3)"
+    )]
+    public void A_group_open_around_the_lookahead_keys_its_start_apart(
+        string pattern,
         string subject,
         string operation,
         string expected
     )
     {
-        Run(@"a*(a*(?=(?:a|b)*)b)\1", subject, operation).Should().Be(expected);
+        Run(pattern, subject, operation).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// The first pattern without partial matching, where the memo is off: no start has a group
+    /// that <c>\1</c> can repeat before the end. Upstream 2026.9.29 answers None (D122 review W2),
+    /// so a fix that keys the group's start must leave the full-match answer alone.
+    /// </summary>
+    [Test]
+    public void A_group_open_around_the_lookahead_finds_no_full_match()
+    {
+        var regex = new FuzzyRegex(@"a*(a*(?=(?:a|b)*)b)\1");
+
+        (regex.Match("aabaa").Success, regex.MatchAtStart("aabaa").Success).Should().Be((false, false));
     }
 
     private static string Run(string pattern, string subject, string operation)

@@ -368,7 +368,7 @@ internal static class TailGuardLiveness
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     /// <returns>Node to its enclosing groups.</returns>
-    private static Dictionary<object, int[]> EnclosingGroups(PatternObject pattern)
+    internal static Dictionary<object, int[]> EnclosingGroups(PatternObject pattern)
     {
         var result = new Dictionary<object, int[]>(ReferenceEqualityComparer.Instance);
         var todo = new Stack<(Node Node, int[] Open)>();
