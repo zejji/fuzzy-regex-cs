@@ -239,6 +239,10 @@ UNRESTRICTED_EMPTY_RUN = None
 # repeat; exact, like the empty-iteration check). Part of the recommended rule;
 # False leaves only the empty-iteration check, for measuring what each adds.
 NEEDED_DEDUP_ALL = True
+# D133 (model E): an error is permitted only if every enclosing section's
+# maximums still hold with it (see permitted). False gives upstream's model L,
+# where only the innermost section is asked and the others at their END_FUZZY.
+EAGER_MAXIMA = False
 TYPES = ("s", "i", "d")
 
 
@@ -985,10 +989,29 @@ def minimum_unmet(st):
 
 
 def permitted(st, t):
-    """this_error_permitted (_regex.c:9676): room for one more error of type t."""
+    """this_error_permitted (_regex.c:9676): room for one more error of type t.
+
+    With EAGER_MAXIMA (D133, model E), every enclosing section's maximums are
+    asked too, with the counts it will hold once the sections inside it close
+    (END_FUZZY adds them up, _regex.c:12475-12481). Counts only grow and costs
+    are not negative, so this prunes only paths that END_FUZZY would fail; it
+    changes an answer only where a committing construct kept such a path."""
     lim, c = st.limits, st.counts
     cost = sum(n * w for n, w in zip(c, lim.costs)) + lim.costs[t]
-    return c[t] < lim.maxs[t] and sum(c) < lim.maxs[3] and cost <= lim.max_cost
+    if not (c[t] < lim.maxs[t] and sum(c) < lim.maxs[3] and cost <= lim.max_cost):
+        return False
+    if not EAGER_MAXIMA:
+        return True
+    counts = list(c)
+    counts[t] += 1
+    for saved, limits in reversed(st.outer):
+        if saved is None:
+            break
+        counts = [a + b for a, b in zip(saved, counts)]
+        cost = sum(n * w for n, w in zip(counts, limits.costs))
+        if any(counts[k] > limits.maxs[k] for k in range(3)) or sum(counts) > limits.maxs[3] or cost > limits.max_cost:
+            return False
+    return True
 
 
 def add_error(st, t, pos, node=None):
