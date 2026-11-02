@@ -1,7 +1,7 @@
 # Current state
 
 **Updated:** 2026-11-02 21:25 by Claude Code (overnight: item 13's full BDN in the 23:30-04:30 window; CHANGELOG).
-**Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
+**Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
 
@@ -21,7 +21,7 @@
 | 10 | D133 enclosing-section maxima checked when an error is made | `fix/d133` | **merged** 3ed7b82c (F122; D136 condition tests deferred); timing nested 0.707, non-partial 1.004 inside A-A | - |
 | 11 | D131 committing construct + D81 run-out | `fix/d131-by-d133` | **merged** 9191547b (F123: closed by D133, regression tests; fix/d131 superseded) | - |
 | 12 | D125 lastindex through a reversed call | `fix/d125-on-main` | **merged** e23ee6eb (F124; port and upstream; ledger 98) | - |
-| 13 | Release 1.2 | main | - | full BDN vs 1.1.0 incl. D82's rows, CHANGELOG, notes, `docs/RELEASING.md` |
+| 13 | Release 1.2 | main | CHANGELOG, notes draft, version, README done (bb408535) | BDN tonight, notes' performance section, gates (ratchet, oracle, AOT, pack); owner tags |
 
 Every merge: JetBrains inspection (several Junie commits used `--no-verify`), ratchet, oracle 7 and
 4242, KNOWN-DEFECTS row updated. Commit or merge to main once verified per `docs/VERIFICATION.md`;
@@ -38,16 +38,13 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN: runner `.scratch/s1024/bdn-v120.ps1` (pwsh PID 30892), log `.scratch/s1024/bdn-v120.log`,
-  artifacts `.scratch/s1024/bdn-v120/`. Waits for 23:31, then whole suite `--job medium`, pinned, three passes:
-  v1.1.0 (worktree v110), main de4bbc84 (v120), 2373e273 (d82base, D82's baseline). Quiet window agreed
-  with peer s06c-51 (future-ide) 23:30-04:30; send it the end message when done. Then compare with
-  `tools/compare-benchmarks.ps1` (model: `.scratch/s1024/bdn-v110-compare.ps1`) and write the note in `bench/baselines/`.
+- Item 13 BDN: `.scratch/s1024/bdn-v120.ps1` (pwsh PID 30892, log `bdn-v120.log`, artifacts `bdn-v120/`) from 23:31:
+  whole suite, medium, pinned; passes v110 (1.1.0), v120 (de4bbc84), d82base (2373e273). Window with s06c-51 23:30-04:30:
+  message it at the end. Compare like `.scratch/s1024/bdn-v110-compare.ps1`; note into `bench/baselines/`.
 - Guards running: watchdog.ps1 PID 51816, jbguard.ps1 PID 18468.
-- Main de4bbc84 equals origin/main (owner pushed 2026-11-02).
 - Deferred: D134 (atomic around a recorded lookahead), D135 (D122 compile allocation, 1.3), D136 (condition tests under D133's rule).
-- Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
+- Gates on bb408535: Release ratchet GREEN; oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred). Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
 
 ## Waiting on the owner: nothing (window granted 2026-11-02; release stops at ready-not-tagged).
 
-**Next action:** item 13: CHANGELOG and release notes for 1.2 (F115-F124) can start now; full BDN vs 1.1.0 incl. D82's rows in the owner's timing window; `docs/RELEASING.md`.
+**Next action:** item 13: gates before 23:30; after the BDN, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
