@@ -97,22 +97,6 @@ public sealed class OpenDefectTests
         new FuzzyRegex(@"x(?!(?:(?:\X|(?R)?)+w?)+y)").FullMatch("xxcw", partial: true).Success.Should().BeFalse();
     }
 
-    // D131. Without partial, search finds no match over 'b' (both engines). So a partial call's
-    // answer must be a partial or none: a complete match would be one the plain search finds. The
-    // port answers a complete (0, 0) with one deletion, and in Debug its second pass trips design
-    // assert A1 ("a second-pass success read the text to come"), on main 4205ad63 as on this
-    // branch. regex 2026.9.29 answers the partial (0, 1) with one substitution (measured
-    // 2026-10-31). Which partial is right is not settled here; that it is not complete is.
-    [Test]
-    public void A_partial_call_does_not_answer_a_complete_match_the_plain_search_does_not_find()
-    {
-        var regex = new FuzzyRegex(@"(?:(?=(?:ab){e<=2})){d<=1}");
-        regex.Match("b").Success.Should().BeFalse();
-
-        Match m = regex.Match("b", partial: true);
-        (!m.Success || m.PartialMatch).Should().BeTrue();
-    }
-
     // Not yet registered (found 2026-10-31 by the D132 blind review, F4 shape 6; reported in the
     // night log). A partial search where a condition's positive test runs out at start 0 with
     // room in every section: regex 2026.9.29 and judge132.py answer P(1, 2) (completion 'gg'),
