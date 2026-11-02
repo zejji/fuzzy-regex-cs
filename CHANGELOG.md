@@ -12,7 +12,19 @@ and the release entry is written in phase 8. A **Divergences from mrab-regex** s
 module needs to know where this port deliberately behaves differently. From 1.0 on, entries are
 per release.
 
-## [Unreleased]
+## [1.2.0] - Unreleased
+
+A correctness release. It fixes every defect registered when its scope was frozen on 2026-11-01
+that can give a wrong answer, most of them in partial matching and in fuzzy sections nested
+inside one another. The public API is unchanged from 1.1.0.
+
+### Changed
+
+- **Compiling a pattern that has both a lookaround and a capture group allocates 7-12% more**
+  (`(\w+)(?=\w*\d)(?!\d+\b)\w+`: 31,928 to 35,800 bytes). The partial matching fix for D122
+  below builds a table of the groups open around each lookaround, and it is built even when no
+  partial call reads it. Matching allocates no more than before. Building it only for partial
+  calls is planned for 1.3 (D135).
 
 ### Fixed
 
@@ -21,6 +33,33 @@ per release.
   (D121). Backtracking into the conditional forgot that the repeat's body had matched, so a
   failure recorded under one value of the group blocked a path under another. Python `regex`
   gives (0, 1) for the positive-test form (see COMPARISON).
+- **Errors made inside an atomic group, a possessive repeat, a verb or a group call count
+  against every fuzzy section around it as soon as they are made** (D133). The limits of an
+  enclosing section used to be checked only where that section ended, so a committing construct
+  could commit to a path the enclosing section forbids, and the match was lost. Patterns whose
+  fuzzy sections nest also run faster, because hopeless paths stop early. Python `regex` shares
+  the old behaviour (see COMPARISON).
+- **`LastGroupNumber` and `LastGroupName` name the group that closed last** when a group is
+  called with another direction or fuzziness, for example inside a lookbehind:
+  `(?P<g1>x|y(?P>g1)y)(?<=(?P>g1))(a)(b)` over 'cxab' now reports group 3, not group 1 (D125).
+  The called copy recorded a closing order of its own, after every group in the pattern. Python
+  `regex` shares the old answer (COMPARISON, "Inherited upstream bugs are fixed here").
+- **Partial matching gives no partial match that no further text could complete** in these
+  cases:
+  - An insertion made where the text runs out has to fit every fuzzy section around it, not
+    only the innermost one: `(?:(?:f^){i<=2}){i<=1}` over 'fx', partial, is no match, not a
+    partial at (0, 2) (D129). The same holds when the insertion sits inside a positive lookaround
+    or a conditional's positive test, `(?:(?=(?:f^){i<=2})f){i<=1}` (D130, D132).
+  - A group call inside a negative lookaround or a conditional's negative test:
+    `(x)(?!y?(?1))\Z` over 'xy', partial, is no match, not a partial at (0, 2), and searched over
+    'xxy' it is a partial at (3, 3), not (1, 3) (D101).
+  - A lookahead inside a capture group, repeated, with a later conditional that reads one of
+    its groups: `((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)` over nine 'a's and a 'b', searched as a
+    partial, is a partial at (10, 10), not (0, 10). It also no longer forks until the budget
+    stops it (D122).
+- **A partial call and a plain call agree on complete matches**: `(?:(?=(?:ab){e<=2})){d<=1}`
+  over 'b' is a complete match at (0, 0) both ways. Before, the plain call found no match while
+  the partial call reported this complete match (D131, fixed by D133's change).
 
 ## [1.1.0] - 2026-10-26
 
