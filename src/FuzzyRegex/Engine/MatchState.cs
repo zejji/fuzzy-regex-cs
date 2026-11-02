@@ -1661,7 +1661,7 @@ internal sealed class MatchState : IDisposable
             bool keysContinuations = pattern.CutBodies?.ContinuationKeyRepeats is not null;
             _cutBody = new CutBodyRecords(
                 cutBodyKeyLength,
-                keysContinuations ? 2 * pattern.TrueGroupCount : 0,
+                keysContinuations ? (2 * pattern.TrueGroupCount) + ParkedStartSlots(pattern) : 0,
                 keysContinuations
             );
         }
@@ -1687,7 +1687,7 @@ internal sealed class MatchState : IDisposable
     /// <returns>The enclosing FUZZY node, or <see langword="null"/> when there is none.</returns>
     internal Node? TryOuterSection(ref int frame, Span<long> outerCounts)
     {
-        if (frame < SectionFrameSize || frame > Sstack.Count)
+        if (!TryEntryCounts(frame, outerCounts))
         {
             return null;
         }
@@ -1698,13 +1698,32 @@ internal sealed class MatchState : IDisposable
             return null;
         }
 
-        int counts = frame - (5 * sizeof(long));
-        outerCounts[FuzzyValue.Sub] = Sstack.SizeAt(counts + (FuzzyValue.Sub * sizeof(long)));
-        outerCounts[FuzzyValue.Ins] = Sstack.SizeAt(counts + (FuzzyValue.Ins * sizeof(long)));
-        outerCounts[FuzzyValue.Del] = Sstack.SizeAt(counts + (FuzzyValue.Del * sizeof(long)));
         Node? outer = Sstack.NodeAt(Pattern, frame - sizeof(long));
         frame = (int)link;
         return outer;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D133): the counts the section whose frame ends at <paramref name="frame"/>
+    /// saved when it was entered, which its END_FUZZY adds its own to before it checks the whole
+    /// match's limits. Read whether or not a section encloses it, since the counts outside every
+    /// section are saved too.
+    /// </summary>
+    /// <param name="frame">The end of the section's frame.</param>
+    /// <param name="entryCounts">Receives the counts.</param>
+    /// <returns><see langword="false"/> if no frame ends there.</returns>
+    internal bool TryEntryCounts(int frame, Span<long> entryCounts)
+    {
+        if (frame < SectionFrameSize || frame > Sstack.Count)
+        {
+            return false;
+        }
+
+        int counts = frame - (5 * sizeof(long));
+        entryCounts[FuzzyValue.Sub] = Sstack.SizeAt(counts + (FuzzyValue.Sub * sizeof(long)));
+        entryCounts[FuzzyValue.Ins] = Sstack.SizeAt(counts + (FuzzyValue.Ins * sizeof(long)));
+        entryCounts[FuzzyValue.Del] = Sstack.SizeAt(counts + (FuzzyValue.Del * sizeof(long)));
+        return true;
     }
 
     /// <summary>
@@ -3695,17 +3714,26 @@ internal sealed class MatchState : IDisposable
     /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
     internal void GuardRepeatAfterBlockedEnd(int index, int loPos, int hiPos, uint guardType)
     {
-        if (
-            _cutBody is not { Writes: < KeyedTailWriteCap } records
-            || !RecordsAfterBlockedEnd(index, guardType)
-            || CutBodyKeyOf(index, guardType, loPos) is not long[] key
-        )
+        if (_cutBody is not CutBodyRecords records || !RecordsAfterBlockedEnd(index, guardType))
+        {
+            return;
+        }
+
+        if (records.Writes >= KeyedTailWriteCap)
+        {
+            WorkCounter.CutBodyWritten(records.Store.Count, skipped: true);
+            return;
+        }
+
+        if (CutBodyKeyOf(index, guardType, loPos) is not long[] key)
         {
             return;
         }
 
         records.Writes++;
-        if (records.Store.ForWrite(key, mayAdd: records.Store.Count < CutBodyKeyCap) is not GuardList list)
+        GuardList? list = records.Store.ForWrite(key, mayAdd: records.Store.Count < CutBodyKeyCap);
+        WorkCounter.CutBodyWritten(records.Store.Count, skipped: list is null);
+        if (list is null)
         {
             return;
         }
@@ -3821,9 +3849,17 @@ internal sealed class MatchState : IDisposable
     /// of the body (<see cref="CutBodyFacts.ContinuationKeyRepeats"/>), whose enclosing loops include the
     /// lookaround's, the touch flag and those loops' count, start and progress bit. The memo is off
     /// where anything else could differ: under fuzzy matching, group calls, backtracking verbs and
-    /// <c>\K</c>; with a construct open around the lookaround; and with anything saved below its
-    /// parked state (<paramref name="savedBelow"/>), such as the parked start of a group open
-    /// around it, from which the continuation would capture.
+    /// <c>\K</c>; and with a construct open around the lookaround.
+    /// </para>
+    /// <para>
+    /// The parked start of each group open around the lookaround is in the key too (D122): the
+    /// continuation captures from it, so without it `a*(a*(?=(?:a|b)*)b)\1` over 'aabaa' replayed
+    /// the failure recorded with group 1 open at 2 for the arrival with it open at 0, and answered
+    /// P(3, 5) for P(0, 5). Outside fuzzy matching and group calls, with no construct open around
+    /// the lookaround, the save stack below its parked state (<paramref name="savedBelow"/>) holds
+    /// exactly those starts, outermost first (<see cref="CutBodyFacts.ContinuationOpenGroups"/>);
+    /// anything else there and the memo is off. Before D122 the memo was off wherever a start was
+    /// there, so such a pattern forked until the budget stopped it and answered its phantom.
     /// </para>
     /// </remarks>
     /// <param name="look">The LOOKAROUND node.</param>
@@ -3833,9 +3869,8 @@ internal sealed class MatchState : IDisposable
     internal bool ContinuationKeyOf(Node look, int textPos, long savedBelow)
     {
         if (
-            Pattern.CutBodies?.ContinuationKeyRepeats is not int[] repeats
+            Pattern.CutBodies is not { ContinuationKeyRepeats: int[] repeats } facts
             || repeats[look.Index] is not (>= 0 and int repeat)
-            || savedBelow != 0
             || IsFuzzy
             || PartialSide == PartialNone
             || Pattern.HasGroupCalls
@@ -3850,12 +3885,29 @@ internal sealed class MatchState : IDisposable
             return false;
         }
 
+        // D122: a group parks its start only where captures are kept (SkipsCaptures).
+        int open = SkipsCaptures || facts.ContinuationOpenGroups is not int[] openGroups ? 0 : openGroups[look.Index];
+        Debug.Assert(
+            savedBelow == sizeof(long) * open,
+            "D122: below the lookaround's parked state, exactly one parked start per group open around it"
+        );
+        if (savedBelow != sizeof(long) * open)
+        {
+            return false;
+        }
+
         // The borrowed key's groups are the ones live at the repeat; a group the body writes after
         // it and the continuation reads is not, so every group's span is added, exactly. A finer
         // key than needed only costs hits. The borrowed key is finer in a second way: it reads the
         // save-stack slots of the groups the repeat is inside, which by the lookaround's end are
         // closed, so the slots hold what the body left there rather than group starts, and two
-        // arrivals whose bodies took different paths get different keys (lost hits, D123).
+        // arrivals whose bodies took different paths get different keys (lost hits, D123). Those
+        // reads count from the top, so they can also land on the parked state, or, with groups open
+        // around the lookaround, on their parked starts (D122 review, point 3; a run-out can leave a
+        // body's group open above, so where is not fixed). Whatever they read is an extra slot:
+        // everything the continuation reads has its own slot below, so they can make the key
+        // finer, never coarser. With the starts' slots dropped, `a*(a*(((((((?=(?:a|b)*)))))))b)\1`,
+        // whose read lands on a start, is answered wrong (PartialContinuationMemoTests).
         key[0] = ~(long)look.Index;
         int k = _cutBody!.BaseLength;
         for (int g = 0; g < Groups.Length; g++, k += 2)
@@ -3866,9 +3918,37 @@ internal sealed class MatchState : IDisposable
             key[k + 1] = span.End;
         }
 
+        // D122: the open groups' parked starts, from the bottom of the save stack; then -1, never a
+        // text position, in the slots a lookaround with fewer open groups leaves. Their number
+        // goes first, though the lookaround in key[0] fixes it: a key that names its own layout.
+        int slots = ParkedStartSlots(Pattern);
+        if (slots > 0)
+        {
+            key[k++] = open;
+            for (int i = 0; i < slots - 1; i++, k++)
+            {
+                key[k] = i < open ? Sstack.SizeAt(i * sizeof(long)) : -1;
+                Debug.Assert(
+                    i >= open || key[k] is >= 0 && key[k] <= TextLength,
+                    "D122: a parked start is a text position"
+                );
+            }
+        }
+
         key.AsSpan().CopyTo(_cutBody.ContinuationKey);
         return true;
     }
+
+    /// <summary>
+    /// NOT UPSTREAM (D122): the slots a continuation key keeps for parked starts
+    /// (<see cref="ContinuationKeyOf"/>): their number and one per group open around the
+    /// lookaround with the most, or none when no keyed lookaround has a group open around it, so
+    /// that every other pattern's keys are as long as before.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The slots.</returns>
+    private static int ParkedStartSlots(PatternObject pattern) =>
+        pattern.CutBodies is { MaxContinuationOpenGroups: > 0 and int most } ? most + 1 : 0;
 
     /// <summary>
     /// NOT UPSTREAM (D104): the guard type a continuation key carries, so that it can equal no
@@ -3918,14 +3998,12 @@ internal sealed class MatchState : IDisposable
         }
 
         // Counted before the write, as GuardRepeatAfterBlockedEnd and the keyed tail store count.
-        if (
+        GuardList? list =
             records.Writes++ < KeyedTailWriteCap
-            && records.Store.ForWrite(records.ContinuationKey, mayAdd: records.Store.Count < CutBodyKeyCap)
-                is GuardList list
-        )
-        {
-            list.Guard((int)textPos, true);
-        }
+                ? records.Store.ForWrite(records.ContinuationKey, mayAdd: records.Store.Count < CutBodyKeyCap)
+                : null;
+        WorkCounter.CutBodyWritten(records.Store.Count, skipped: list is null);
+        list?.Guard((int)textPos, true);
 
         return true;
     }

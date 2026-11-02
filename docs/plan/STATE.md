@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-02 00:30 by Claude Code (item 8 merged; item 9 gate running; owner: pause all by 07:40 Mon 11-02).
+**Updated:** 2026-11-02 03:40 by Claude Code (items 8, 9 merged; item 10 builder running; owner: pause all by 07:40 Mon 11-02).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main's `src/` equals 1.1.0's.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -16,9 +16,9 @@
 | 5 | D132 condition-test run-out | `fix/d132` | **merged** 7c84be58 (F118) | - |
 | 6 | D121 conditional restore | `fix/d121` | **merged** 925345e8 (F119) | - |
 | 7 | D80 ablation labels | `fix/d80-labels` | **merged** 76b5b6c7 (mislabels; row 34508 stays open) | - |
-| 8 | D101 + frame cut (kept) | `review/d101-cut-surrogate` | **merged** cc30e761 (F120 D127; D101 partly, 2 rows open; oracle 7/4242 after merge) | - |
-| 9 | D122 continuation memo phantom | `fix/d122` | review follow-ups done (D134 deferred); `.scratch/s1101/gate9.ps1` ratchet GREEN, commit + oracle running | merge to main, gates, F row |
-| 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/atomic-lookbehind` (rows) | blind review: real defect | register, verify, grid scope, second blind review, fix test-first, gates |
+| 8 | D101 + frame cut (kept) | `review/d101-cut-surrogate` | **merged** cc30e761 (F120 D127; D101 partly, 2 rows open) | - |
+| 9 | D122 continuation memo phantom | `fix/d122-on-main` | **merged** 769c7ca1 (F121; D134 deferred) | - |
+| 10 | D133 enclosing-section maxima checked when an error is made (both engines) | `fix/d133` | registered 10382543; blind review: E right, scope set (`.scratch/s1101/d133/DESIGN.md`); Opus builder: WIP 474109c8, grid 20,580/20,580 = E | builder hand-back, verify, timing (nested non-committing rows), gates, merge |
 | 11 | D131 committing construct + D81 run-out | `fix/d131` (WIP) | design v3 + review limits | implement test-first, gates (may share #10's root) |
 | 12 | D125 lastindex through a reversed call | `fix/d125` | red tests | root cause, fix, gates |
 | 13 | Release 1.2 | main | - | full BDN vs 1.1.0 incl. D82's rows, CHANGELOG, notes, `docs/RELEASING.md` |
@@ -38,11 +38,10 @@ pushes need the owner.
 
 ## In flight
 
-- Item 8 oracle on main: `.scratch/s1101/merge8.status` (PID 29044); if red, fix before item 9's merge.
-- Item 9: `.scratch/s1101/gate9.ps1` (PID 47696, `gate9.status`): commit on fix/d122, then oracle 7/4242.
+- Item 10: Opus builder (background subagent) in `.claude/worktrees/d133`, hands back by 07:00; WIP commits on fix/d133.
 - Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH. Message peer s06b-e8 before heavy steps.
 - Overnight timing results and item 10 (D133) research notes: `.scratch/s1024/NIGHT-1101-PLAN.md`.
 
 ## Waiting on the owner: nothing. Owner 11-01: continue overnight, use all time, pause everything by 07:40.
 
-**Next action:** item 8 oracle result; item 9 gate, then merge fix/d122 to main (ratchet, inspection, oracle); then item 10 (D133).
+**Next action:** item 10 builder hand-back: verify claims, re-run `.scratch/s1101/d133/port-grid.ps1` on the final build, timing, gates, merge.

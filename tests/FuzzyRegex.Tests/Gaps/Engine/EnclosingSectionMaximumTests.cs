@@ -57,6 +57,10 @@ public sealed class EnclosingSectionMaximumTests
     [Arguments(@"(?:(?>(?:ab){e<=1})){1d+2s<=1}", "bb", 1)]
     [Arguments(@"(?:(?>(?&g))){d<=1}(?(DEFINE)(?P<g>(?:ab){e<=1}))", "bb", 1)]
     [Arguments(@"(?:(?=(?:ab){e<=1})b){d<=1}", "bb", 1)]
+    // BESTMATCH and ENHANCEMATCH, whose passes bound the whole match's errors or cost.
+    [Arguments(@"(?b)(?:(?>(?:ab){e<=1})){d<=1}", "bb", 1)]
+    [Arguments(@"(?e)(?:(?>(?:ab){e<=1})){d<=1}", "bb", 1)]
+    [Arguments(@"(?b)(?:(?:(?:ab){e<=1})++){d<=1}", "bb", 1)]
     public void A_committed_inner_error_fits_the_enclosing_section(string pattern, string text, int end)
     {
         Match m = new FuzzyRegex(pattern).MatchAtStart(text);
@@ -135,16 +139,32 @@ public sealed class EnclosingSectionMaximumTests
 
     /// <summary>
     /// The search finds the match at the first start where one exists, rather than at the next start
-    /// where the inner section's first choice happens to suit the outer one. Upstream and the port
-    /// before D133: (2, 3).
+    /// where the inner section's first choice happens to suit the outer one. The port before D133:
+    /// (2, 3) on the first three rows and None on the rest.
     /// </summary>
-    // DIVERGES FROM UPSTREAM 2026.9.29, and this test pins OUR answer.
+    /// <remarks>
+    /// The lookbehind rows: a positive lookbehind's body is atomic and its errors count against the
+    /// section around it (D130), so at 2 its substitution of the 'a' is refused, the body deletes
+    /// the 'a' instead, and the 'c' matches. Before D133 the body committed to the substitution and
+    /// the outer <c>{d&lt;=1}</c> failed it, at every start.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="text">The subject.</param>
+    /// <param name="start">The start of the expected match.</param>
+    /// <param name="end">Its end.</param>
+    // DIVERGES FROM UPSTREAM 2026.9.29 (first row measured: (2, 3)), and this test pins OUR answer.
     [Test]
-    public void A_search_finds_the_earliest_start()
+    [Arguments(@"(?:(?>(?:ab){e<=1})){d<=1}", "zbb", 1, 2)]
+    [Arguments(@"(?b)(?:(?>(?:ab){e<=1})){d<=1}", "zbb", 1, 2)]
+    [Arguments(@"(?e)(?:(?>(?:ab){e<=1})){d<=1}", "zbb", 1, 2)]
+    [Arguments(@"(?e)(?:x(?>(?:ab){e<=1})){d<=1}", "zxbb", 1, 3)]
+    [Arguments(@"(?:(?<=(?:ab){e<=1})c){d<=1}", "bbc", 2, 3)]
+    [Arguments(@"(?:(?<=(?>(?:ab){e<=1}))c){d<=1}", "bbc", 2, 3)]
+    public void A_search_finds_the_earliest_start(string pattern, string text, int start, int end)
     {
-        Match m = new FuzzyRegex(@"(?:(?>(?:ab){e<=1})){d<=1}").Match("zbb");
+        Match m = new FuzzyRegex(pattern).Match(text);
 
-        (m.Success, m.Index, m.Length).Should().Be((true, 1, 1));
+        (m.Success, m.Index, m.Index + m.Length).Should().Be((true, start, end));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
@@ -175,6 +195,10 @@ public sealed class EnclosingSectionMaximumTests
     [Test]
     [Arguments(@"(?:(?!(?:ab){s<=1})bb){d<=1}", "bb")]
     [Arguments(@"(?:(?!(?:b){e<=2}x)c){i<=1}", "cx")]
+    // An atomic group inside the body: the walk goes past it to the section the body opened
+    // around it, which refuses the substitution (the body then deletes the 'a' and matches),
+    // and stops at the body. Before D133 the body failed and 'bb' matched (0, 2).
+    [Arguments(@"(?:(?!(?:(?>(?:ab){e<=1})){d<=1})bb){i<=0}", "bb")]
     public void A_negative_lookaround_body_is_not_limited_by_the_sections_around_it(string pattern, string text) =>
         new FuzzyRegex(pattern).MatchAtStart(text).Success.Should().BeFalse();
 
@@ -182,9 +206,33 @@ public sealed class EnclosingSectionMaximumTests
     /// A condition's test stops the walk (deferred; a test is not monotone, so pruning inside it lets
     /// the no-branch run). The test's substitution is made, the yes-branch runs, and the outer
     /// <c>{d&lt;=1}</c> fails it at its end, as in both engines before D133. Walking past the test
-    /// would refuse the substitution, let the test delete the 'a' instead, and answer (0, 1).
+    /// would refuse the substitution; the test's <c>{s&lt;=1}</c> allows no deletion, so the test
+    /// would be false and the no-branch <c>bb</c> would answer (0, 2).
     /// </summary>
     [Test]
     public void A_condition_test_is_not_limited_by_the_sections_around_it() =>
         new FuzzyRegex(@"(?:(?(?=(?:ab){s<=1})b|bb)){d<=1}").MatchAtStart("bb").Success.Should().BeFalse();
+
+    /// <summary>
+    /// D94's insertion in front of an item that matched exactly, below a minimum, is asked of the
+    /// sections around it as every other error is, so inside a negative lookaround's body or a
+    /// condition's test the sections outside do not limit it (DECISIONS 2026-11-02). Inserting the
+    /// 'a' and substituting the 'b' meets the inner minimum, so the body, or the test, matches: the
+    /// negative lookahead fails and the true condition's 'xx' fails. Before D133, D94 refused the
+    /// insertion on the outer <c>{i&lt;=0}</c>, and both matched 'ab' (0, 2), as the oracle's ablation
+    /// of D133 still does.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    [Test]
+    [Arguments(@"(?:(?!(?:a){1<=s<=1,i<=1}$)ab){i<=0}")]
+    [Arguments(@"(?:(?(?=(?:a){1<=s<=1,i<=1}$)xx|ab)){i<=0}")]
+    public void An_insertion_for_a_minimum_inside_a_negative_body_or_a_test_is_not_limited_outside(string pattern)
+    {
+        new FuzzyRegex(pattern).MatchAtStart("ab").Success.Should().BeFalse();
+
+        var ablated = new FuzzyRegex(pattern);
+        ablated.PatternObject.MaximaAsBeforeD133 = true;
+        Match m = ablated.MatchAtStart("ab");
+        (m.Success, m.Index, m.Length).Should().Be((true, 0, 2));
+    }
 }

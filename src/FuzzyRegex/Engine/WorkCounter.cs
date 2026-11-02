@@ -143,6 +143,20 @@ internal static class WorkCounter
     [field: ThreadStatic]
     internal static long LookaroundFoldVisits { get; private set; }
 
+    /// <summary>
+    /// The most keys the records written after a blocked end held at once in one pass on this
+    /// thread (<c>MatchState.CutBodyKeyCap</c>), so a test can see how near a pattern runs to the cap.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CutBodyKeysPeak { get; private set; }
+
+    /// <summary>
+    /// Records after a blocked end, or of a failed continuation, skipped on this thread because the
+    /// pass had reached <c>MatchState.CutBodyKeyCap</c> or <c>MatchState.KeyedTailWriteCap</c>.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CutBodyWritesSkipped { get; private set; }
+
     /// <summary>Whether this build counts at all: <see langword="true"/> in Debug only.</summary>
     internal static bool Enabled
     {
@@ -216,6 +230,19 @@ internal static class WorkCounter
     /// <summary>Counts one fall-back from ignore-case leading strings to their code units.</summary>
     [Conditional("DEBUG")]
     internal static void LeadingStringFellBack() => LeadingStringFallbacks++;
+
+    /// <summary>Notes a write to the records after a blocked end.</summary>
+    /// <param name="keys">How many keys the store holds after it.</param>
+    /// <param name="skipped">Whether a cap skipped it.</param>
+    [Conditional("DEBUG")]
+    internal static void CutBodyWritten(int keys, bool skipped)
+    {
+        CutBodyKeysPeak = Math.Max(CutBodyKeysPeak, keys);
+        if (skipped)
+        {
+            CutBodyWritesSkipped++;
+        }
+    }
 
     /// <summary>Counts one guard list kept across a conditional's restore.</summary>
     [Conditional("DEBUG")]

@@ -5576,11 +5576,26 @@ internal static class Matcher
     /// <returns>The key, valid until the next call of this method.</returns>
     private static ReadOnlySpan<long> FailedCallKey(MatchState state, int callIndex)
     {
-        static void AddRoom(List<long> key, uint maximum, long count)
+        static long Room(uint maximum, long count) => maximum == RegexFlags.Unlimited ? long.MaxValue : maximum - count;
+
+        static void AddRoom(List<long> key, uint maximum, long count, long cap)
         {
             if (maximum != RegexFlags.Unlimited)
             {
-                key.Add(maximum - count);
+                key.Add(Math.Min(maximum - count, cap));
+            }
+        }
+
+        static void AddPassRooms(List<long> key, MatchState state, ReadOnlySpan<long> merged, Node weights, long cap)
+        {
+            if (state.MaxErrors != long.MaxValue)
+            {
+                key.Add(Math.Min(state.MaxErrors - TotalErrors(merged), cap));
+            }
+
+            if (state.MaxCost != long.MaxValue)
+            {
+                key.Add(state.MaxCost - TotalCost(merged, weights));
             }
         }
 
@@ -5606,7 +5621,7 @@ internal static class Matcher
         // The enclosing sections, as RaisesUnmetMinimum walks them. Ends: MatchState.TryOuterSection
         // only steps to a lower frame.
         int sectionsAt = key.Count;
-        if (state.SectionFrame >= 0 && state.FuzzyNode is not null)
+        if (state.SectionFrame >= 0 && state.FuzzyNode is { } keySection)
         {
             long sub = counts[FuzzyValue.Sub];
             long ins = counts[FuzzyValue.Ins];
@@ -5614,8 +5629,47 @@ internal static class Matcher
             int frame = state.SectionFrame;
             FuzzyCountBuffer outerCountsBuffer = default;
             Span<long> outerCounts = outerCountsBuffer;
-            while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+            FuzzyCountBuffer levelBuffer = default;
+            Span<long> level = levelBuffer;
+
+            // NOT UPSTREAM (D133): an error inside the call is refused where it would break a maximum
+            // of a section around this one or the whole match's limits (OneMoreErrorFitsTheOpenSections),
+            // so the room left under each limited one is part of the state. An unlimited one adds
+            // nothing, the same for every call the set compares. Every error the call makes, outside
+            // a negative lookaround's body or a condition's test where that walk stops, counts against
+            // this section too, which the walk asks first: an outer room of a kind at least this
+            // section's room of that kind can never refuse one, so the rooms are clamped to it and
+            // calls that differ only beyond it share a key. A cost room is not clamped: the sections
+            // weigh the kinds differently.
+            uint[] own = keySection.Values;
+            long errorsNow = sub + ins + del;
+            long errorRoom = Room(own[FuzzyValue.MaxErr], errorsNow);
+            long subRoom = Math.Min(Room(own[FuzzyValue.MaxSub], sub), errorRoom);
+            long insRoom = Math.Min(Room(own[FuzzyValue.MaxIns], ins), errorRoom);
+            long delRoom = Math.Min(Room(own[FuzzyValue.MaxDel], del), errorRoom);
+            if (subRoom != long.MaxValue && insRoom != long.MaxValue && delRoom != long.MaxValue)
             {
+                errorRoom = Math.Min(errorRoom, subRoom + insRoom + delRoom);
+            }
+
+            bool passLimited = state.MaxErrors != long.MaxValue || state.MaxCost != long.MaxValue;
+            while (true)
+            {
+                // The whole match's limits as each open section's END_FUZZY asks them, on its counts
+                // plus those it saved on entry, priced with its own weights (ASectionIsOverItsLimits).
+                if (passLimited && state.TryEntryCounts(frame, outerCounts))
+                {
+                    level[FuzzyValue.Sub] = sub + outerCounts[FuzzyValue.Sub];
+                    level[FuzzyValue.Ins] = ins + outerCounts[FuzzyValue.Ins];
+                    level[FuzzyValue.Del] = del + outerCounts[FuzzyValue.Del];
+                    AddPassRooms(key, state, level, keySection, errorRoom);
+                }
+
+                if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
+                {
+                    break;
+                }
+
                 sub += outerCounts[FuzzyValue.Sub];
                 ins += outerCounts[FuzzyValue.Ins];
                 del += outerCounts[FuzzyValue.Del];
@@ -5627,31 +5681,16 @@ internal static class Matcher
                 key.Add(Math.Max(0, values[FuzzyValue.MinDel] - del));
                 key.Add(Math.Max(0, values[FuzzyValue.MinErr] - (sub + ins + del)));
 
-                // NOT UPSTREAM (D133): an error inside the call is refused where it would break a
-                // maximum of this section or the whole match's limits (OneMoreErrorFitsTheOpenSections),
-                // so the room left under each limited one is part of the state. An unlimited one
-                // adds nothing, the same for every call the set compares.
-                long errors = sub + ins + del;
-                AddRoom(key, values[FuzzyValue.MaxSub], sub);
-                AddRoom(key, values[FuzzyValue.MaxIns], ins);
-                AddRoom(key, values[FuzzyValue.MaxDel], del);
-                AddRoom(key, values[FuzzyValue.MaxErr], errors);
-                FuzzyCountBuffer levelBuffer = default;
-                Span<long> level = levelBuffer;
+                AddRoom(key, values[FuzzyValue.MaxSub], sub, subRoom);
+                AddRoom(key, values[FuzzyValue.MaxIns], ins, insRoom);
+                AddRoom(key, values[FuzzyValue.MaxDel], del, delRoom);
+                AddRoom(key, values[FuzzyValue.MaxErr], sub + ins + del, errorRoom);
                 level[FuzzyValue.Sub] = sub;
                 level[FuzzyValue.Ins] = ins;
                 level[FuzzyValue.Del] = del;
-                long cost = TotalCost(level, outer);
-                AddRoom(key, values[FuzzyValue.MaxCost], cost);
-                if (state.MaxErrors != long.MaxValue)
-                {
-                    key.Add(state.MaxErrors - errors);
-                }
-
-                if (state.MaxCost != long.MaxValue)
-                {
-                    key.Add(state.MaxCost - cost);
-                }
+                AddRoom(key, values[FuzzyValue.MaxCost], TotalCost(level, outer), long.MaxValue);
+                AddPassRooms(key, state, level, outer, errorRoom);
+                keySection = outer;
             }
         }
 
@@ -6975,11 +7014,23 @@ internal static class Matcher
     /// <param name="counts">The open section's counts; overwritten with the outermost asked.</param>
     /// <param name="section">The open section, <see cref="MatchState.FuzzyNode"/>.</param>
     /// <param name="bodyBase">What <see cref="StoppingBodyBase"/> returned.</param>
+    /// <param name="withEntryCounts">
+    /// Also ask the whole match's limits on each section's counts plus those it saved on entry,
+    /// priced with its own weights, exactly as its END_FUZZY does (D133). The run-out check (D81)
+    /// leaves it off.
+    /// </param>
     /// <returns><see langword="true"/> if some asked section's upper limit is broken.</returns>
-    private static bool ASectionIsOverItsLimits(MatchState state, Span<long> counts, Node section, long bodyBase)
+    private static bool ASectionIsOverItsLimits(
+        MatchState state,
+        Span<long> counts,
+        Node section,
+        long bodyBase,
+        bool withEntryCounts = false
+    )
     {
         FuzzyCountBuffer outerCountsBuffer = default;
         Span<long> outerCounts = outerCountsBuffer;
+        bool passLimited = withEntryCounts && (state.MaxErrors != long.MaxValue || state.MaxCost != long.MaxValue);
         int frame = state.SectionFrame;
         while (frame > bodyBase)
         {
@@ -6987,6 +7038,25 @@ internal static class Matcher
             if (!WithinTheLimits(counts, section) || TotalErrors(counts) > state.MaxErrors || cost > state.MaxCost)
             {
                 return true;
+            }
+
+            // D133: the whole match's limits exactly as this section's END_FUZZY asks them, on its
+            // counts plus those it saved when it was entered, priced with its own weights
+            // (AdvanceEndFuzzy's TotalErrors and TotalCost of 'totalCounts'). The section around it
+            // prices the same counts with its weights, which may be lower.
+            if (passLimited && state.TryEntryCounts(frame, outerCounts))
+            {
+                FuzzyCountBuffer mergedBuffer = default;
+                Span<long> merged = mergedBuffer;
+                for (int kind = 0; kind < FuzzyValue.Count; kind++)
+                {
+                    merged[kind] = counts[kind] + outerCounts[kind];
+                }
+
+                if (TotalErrors(merged) > state.MaxErrors || TotalCost(merged, section) > state.MaxCost)
+                {
+                    return true;
+                }
             }
 
             if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
@@ -7077,7 +7147,13 @@ internal static class Matcher
 
         state.FuzzyCounts.CopyTo(counts);
         ++counts[fuzzyType];
-        return !ASectionIsOverItsLimits(state, counts, section, StoppingBodyBase(state, pastPositiveTests: false));
+        return !ASectionIsOverItsLimits(
+            state,
+            counts,
+            section,
+            StoppingBodyBase(state, pastPositiveTests: false),
+            withEntryCounts: true
+        );
     }
 
     /// <summary>
@@ -10105,8 +10181,9 @@ internal static class Matcher
     /// <see cref="PatternObject.SkipExactDeletionRetry"/>, since the insertion rides the frame
     /// ledger entry 42 added and its retry goes on to that entry's deletion.
     /// <see cref="ThisErrorPermitted"/> asks every section around the open one too (D133), which
-    /// this used to ask separately: row A of <c>FailedCallMemoTests</c>, whose outer section takes
-    /// no insertion, went past its step bound without that.
+    /// this used to ask separately (<see cref="EnclosingSectionsAdmitAnInsertion"/>, still asked
+    /// under the oracle's ablation of D133): row A of <c>FailedCallMemoTests</c>, whose outer
+    /// section takes no insertion, went past its step bound without that.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if it should.</returns>
@@ -10116,6 +10193,7 @@ internal static class Matcher
         && !state.Pattern.SkipExactDeletionRetry
         && ThisErrorPermitted(state, FuzzyValue.Ins)
         && !AllMinimumsMet(state)
+        && (!state.Pattern.MaximaAsBeforeD133 || EnclosingSectionsAdmitAnInsertion(state))
         && ASubstitutionMayFollow(state);
 
     /// <summary>
@@ -10519,6 +10597,51 @@ internal static class Matcher
         }
 
         return [.. tests];
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D94): whether every section around the current one can take one more insertion
+    /// and one more error, as each will count it once the sections inside it close.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ThisErrorPermitted"/> asked only the current section before D133. Where an
+    /// enclosing one permits no insertion, an insertion leads only to its own <c>END_FUZZY</c>
+    /// failing, after a search of everything in between: row A of <c>FailedCallMemoTests</c>,
+    /// whose outer section takes no insertion, went past its step bound without this check.
+    /// Since D133 <see cref="OneMoreErrorFitsTheOpenSections"/> asks this and more, and stops at a
+    /// negative lookaround's body and a condition test, where this does not; this is asked only
+    /// under the oracle's ablation of D133 (<see cref="PatternObject.MaximaAsBeforeD133"/>), so that
+    /// the ablation answers as the port did before D133.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if they can.</returns>
+    private static bool EnclosingSectionsAdmitAnInsertion(MatchState state)
+    {
+        int frame = state.SectionFrame;
+        if (frame < 0)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long ins = counts[FuzzyValue.Ins] + 1;
+        long errors = TotalErrors(counts) + 1;
+        FuzzyCountBuffer outerCountsBuffer = default;
+        Span<long> outerCounts = outerCountsBuffer;
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
+        while (state.TryOuterSection(ref frame, outerCounts) is { } outer)
+        {
+            ins += outerCounts[FuzzyValue.Ins];
+            errors += outerCounts[FuzzyValue.Sub] + outerCounts[FuzzyValue.Ins] + outerCounts[FuzzyValue.Del];
+            uint[] values = outer.Values;
+            if (ins > values[FuzzyValue.MaxIns] || errors > values[FuzzyValue.MaxErr])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
