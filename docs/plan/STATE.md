@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-02 21:25 by Claude Code (overnight: item 13's full BDN in the 23:30-04:30 window; CHANGELOG).
+**Updated:** 2026-11-02 21:58 by Claude Code (overnight: item 13's full BDN in the 23:30-04:30 window; CHANGELOG).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -41,10 +41,11 @@ pushes need the owner.
 - Item 13 BDN: `.scratch/s1024/bdn-v120.ps1` (pwsh PID 30892, log `bdn-v120.log`, artifacts `bdn-v120/`) from 23:31:
   whole suite, medium, pinned; passes v110 (1.1.0), v120 (de4bbc84), d82base (2373e273). Window with s06c-51 23:30-04:30:
   message it at the end. Compare like `.scratch/s1024/bdn-v110-compare.ps1`; note into `bench/baselines/`.
-- Guards running: watchdog.ps1 PID 51816, jbguard.ps1 PID 18468.
-- Deferred: D134 (atomic around a recorded lookahead), D135 (D122 compile allocation, 1.3), D136 (condition tests under D133's rule).
-- Gates on bb408535: Release ratchet GREEN; oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred). Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
+- Guards: watchdog PID 51816, jbguard PID 18468. Deferred: D134, D135 (1.3), D136, D137.
+- Gates on main (bb408535/ffca17d6): Release ratchet, AOT suite + smoke (win-x64), rehearsal, doc examples, tag check GREEN;
+  oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred); pack validation only fails Source Link 404s
+  for unpushed commits (re-run after the push). Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
 
 ## Waiting on the owner: nothing (window granted 2026-11-02; release stops at ready-not-tagged).
 
-**Next action:** item 13: gates before 23:30; after the BDN, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
+**Next action:** item 13: after the BDN, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
