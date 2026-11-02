@@ -326,6 +326,10 @@ public sealed class DivergenceRemarksTests
             "engine behaviour on a pattern"
         ),
         ("A search through a conditional inside a repeat finds the leftmost match", "engine behaviour on a pattern"),
+        (
+            "A committing construct inside a fuzzy section keeps only a path every enclosing section allows",
+            "engine behaviour on a pattern"
+        ),
     ];
 
     /// <summary>The members COMPARISON.md's fuzzy worked examples are copied onto, verbatim.</summary>
