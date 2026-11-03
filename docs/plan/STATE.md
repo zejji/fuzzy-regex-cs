@@ -38,8 +38,8 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN rerun after the overnight crashes (log `bdn-v120-crashed-1102.log`; owner cleaned the fans): runner PID 34536
-  from ~02:15, log `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each); thermal
+- Item 13 BDN rerun after the overnight crashes (log `bdn-v120-crashed-1102.log`; owner cleaned the fans): runner PID 16836
+  from 02:15 with turbo boost OFF (owner: powercfg PERFBOOSTMODE 0 and PROCTHROTTLEMAX 99, AC and DC; restore both in the morning), log `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each); thermal
   cut-out (core max >= 100 C or package >= 97 C on 3 readings in a row stops everything, `STOPPED (thermal)`).
 - Guards: watchdog PID 32488, jbguard PID 9944. Deferred: D134, D135 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): Release ratchet, AOT suite + smoke (win-x64), rehearsal, doc examples, tag check GREEN;
