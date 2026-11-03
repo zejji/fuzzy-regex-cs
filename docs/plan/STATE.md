@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-03 02:05 by Claude Code (machine crashed during item 13's BDN; waiting on the owner).
+**Updated:** 2026-11-03 02:16 by Claude Code (item 13 BDN rerun with a thermal cut-out).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -38,14 +38,14 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN: STOPPED. The machine crashed at ~22:48 during pass 1 (v110, core max 99 C), bugcheck 0xF7, then again
-  ~22:57 (0x1A MEMORY_MANAGEMENT) and ~01:52 (no bugcheck). Partial v110 results only. Runner `.scratch/s1024/bdn-v120.ps1`
-  (five passes A B C B A) is ready to relaunch once the owner says the machine is safe for sustained load.
-- Guards: not running since the crash. Deferred: D134, D135 (1.3), D136, D137.
+- Item 13 BDN rerun after the overnight crashes (log `bdn-v120-crashed-1102.log`; owner cleaned the fans): runner PID 34536
+  from ~02:15, log `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each); thermal
+  cut-out (core max >= 100 C or package >= 97 C on 3 readings in a row stops everything, `STOPPED (thermal)`).
+- Guards: watchdog PID 32488, jbguard PID 9944. Deferred: D134, D135 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): Release ratchet, AOT suite + smoke (win-x64), rehearsal, doc examples, tag check GREEN;
   oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred); pack validation only fails Source Link 404s
   for unpushed commits (re-run after the push). Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
 
-## Waiting on the owner: whether to rerun item 13's BDN after tonight's crashes; a push of main (for pack validation).
+## Waiting on the owner: a push of main (for pack validation); tag 1.2 once the notes are reviewed.
 
 **Next action:** item 13: after the BDN, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
