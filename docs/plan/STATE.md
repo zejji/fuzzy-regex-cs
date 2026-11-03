@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-03 02:16 by Claude Code (item 13 BDN rerun with a thermal cut-out).
+**Updated:** 2026-11-03 02:33 by Claude Code (item 13 BDN rerun, CPU capped at 4 GHz).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -38,9 +38,10 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN rerun after the overnight crashes (log `bdn-v120-crashed-1102.log`; owner cleaned the fans): runner PID 16836
-  from 02:15 with turbo boost OFF (owner: powercfg PERFBOOSTMODE 0 and PROCTHROTTLEMAX 99, AC and DC; restore both in the morning), log `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each); thermal
-  cut-out (core max >= 100 C or package >= 97 C on 3 readings in a row stops everything, `STOPPED (thermal)`).
+- Item 13 BDN rerun after the overnight crashes (`bdn-v120-crashed-1102.log`): runner PID 36688 from 02:32, log
+  `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each). CPU capped at 4000 MHz
+  (owner: powercfg PROCFREQMAX and PROCFREQMAX1 = 4000, AC and DC; single-thread peak 3.8 GHz); no temperature tracking.
+  Stop at 07:20 whatever the state (owner leaves 07:40), then set both caps back to 0 (no limit).
 - Guards: watchdog PID 32488, jbguard PID 9944. Deferred: D134, D135 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): Release ratchet, AOT suite + smoke (win-x64), rehearsal, doc examples, tag check GREEN;
   oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred); pack validation only fails Source Link 404s
