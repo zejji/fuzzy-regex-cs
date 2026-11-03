@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-03 02:33 by Claude Code (item 13 BDN rerun, CPU capped at 4 GHz).
+**Updated:** 2026-11-03 07:18 by Claude Code (BDN stalled by sleep; 07:40 stop).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -38,15 +38,15 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN rerun after the overnight crashes (`bdn-v120-crashed-1102.log`): runner PID 36688 from 02:32, log
-  `.scratch/s1024/bdn-v120.log`, passes v110, v120, v120b, v110b, d82base (~65 min each). CPU capped at 4000 MHz
-  (owner: powercfg PROCFREQMAX and PROCFREQMAX1 = 4000, AC and DC; single-thread peak 3.8 GHz); no temperature tracking.
-  Stop at 07:20 whatever the state (owner leaves 07:40), then set both caps back to 0 (no limit).
+- Item 13 BDN: NOT DONE. Rerun from 02:28 (4 GHz cap) stalled: the laptop entered Modern Standby at 02:31/02:54
+  (screen-off timeout) and slept through the night; only 5 of 91 benchmarks of pass 1 ran. Stopped 07:16; cap removed
+  (PROCFREQMAX/PROCFREQMAX1 = 0, boost 2, max state 100). Next try: keep the machine awake (powercfg standby and
+  screen timeouts off, or `powercfg /requestsoverride`), 4 GHz cap, and a progress heartbeat (benchmarks done) every 15 min.
 - Guards: watchdog PID 32488, jbguard PID 9944. Deferred: D134, D135 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): Release ratchet, AOT suite + smoke (win-x64), rehearsal, doc examples, tag check GREEN;
   oracle 7, 4242 green, 20261102 one row = D137 (harness, deferred); pack validation only fails Source Link 404s
   for unpushed commits (re-run after the push). Oracle: `.venvs/regex-2026.9.29/Scripts` first on PATH.
 
-## Waiting on the owner: a push of main (for pack validation); tag 1.2 once the notes are reviewed.
+## Waiting on the owner: a timing window for item 13's BDN (machine kept awake); a push of main; tag 1.2 after the notes.
 
-**Next action:** item 13: after the BDN, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
+**Next action:** item 13: rerun the BDN in the owner's next window; then compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
