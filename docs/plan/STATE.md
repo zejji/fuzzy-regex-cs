@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-03 20:25 by Claude Code (BDN paused for the future-ide session).
+**Updated:** 2026-11-04 02:10 by Claude Code (item 13 BDN done; note, notes, D138).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -21,7 +21,7 @@
 | 10 | D133 enclosing-section maxima checked when an error is made | `fix/d133` | **merged** 3ed7b82c (F122; D136 condition tests deferred); timing nested 0.707, non-partial 1.004 inside A-A | - |
 | 11 | D131 committing construct + D81 run-out | `fix/d131-by-d133` | **merged** 9191547b (F123: closed by D133, regression tests; fix/d131 superseded) | - |
 | 12 | D125 lastindex through a reversed call | `fix/d125-on-main` | **merged** e23ee6eb (F124; port and upstream; ledger 98) | - |
-| 13 | Release 1.2 | main | CHANGELOG, notes draft, version, README done (bb408535) | BDN tonight, notes' performance section, gates (ratchet, oracle, AOT, pack); owner tags |
+| 13 | Release 1.2 | main | CHANGELOG, notes, version, README, BDN note (1.2 = 1.1 within ~1%; D138 deferred) done | owner: push main, review notes, tag; then pack validation |
 
 Every merge: JetBrains inspection (several Junie commits used `--no-verify`), ratchet, oracle 7 and
 4242, KNOWN-DEFECTS row updated. Commit or merge to main once verified per `docs/VERIFICATION.md`;
@@ -38,13 +38,13 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN: rerun started 20:14 stopped 20:24 at the owner's request (a future-ide session starts; agree quiet time with
-  it, then rerun `.scratch/s1024/bdn-v120.ps1`, ~70 min a pass x5). For the run: PROCFREQMAX/1 = 4000 (now 0), heartbeat
-  `bdn-heartbeat.ps1` (update its PID) on a 15-min cron. AC monitor and standby timeouts 0 until 07:17 (restore to 10 min).
-- Guards not running (reboot 17:25). Deferred: D134, D135 (1.3), D136, D137.
+- Item 13 BDN: DONE 2026-11-04 01:30 (A-B-B-A + d82base, no standby). Note
+  `bench/baselines/.../2026-11-04-v1.2.0-vs-v1.1.0.md`; D138 (+240 B per `Matches` call) deferred to 1.3. Power settings
+  restored by the 07:17 job (cap 0 now; AC monitor/standby timeouts 0 until then).
+- Guards not running (reboot 17:25). Deferred: D134, D135 + D138 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): ratchet, AOT suite + smoke, rehearsal, doc examples, tag check GREEN; oracle 7, 4242
   green, 20261102 one row = D137 (deferred); pack validation fails only Source Link 404s (re-run after the push).
 
 ## Waiting on the owner: a push of main; tag 1.2 after the notes.
 
-**Next action:** item 13: when the BDN ends, compare (v120 vs v110, v120 vs d82base for D82), write the note, fill the release notes' performance section.
+**Next action:** item 13 waits on the owner (push, notes review, tag v1.2.0). Then phase 11, release 1.3 (performance): start from the D82/D135/D138 rows in the 1.2 BDN note.

@@ -1,7 +1,8 @@
 <!--
   Draft of the GitHub release text for v1.2.0, for the owner's review. Sourced from the 1.2.0
   entry in CHANGELOG.md and the open rows of docs/KNOWN-DEFECTS.md on main. Every example was run
-  on 2026-11-02 against v1.1.0 (8de8eaf8) and main (de4bbc84), Release builds. The release
+  on 2026-11-02 against v1.1.0 (8de8eaf8) and main (de4bbc84), Release builds. Performance figures:
+  bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-04-v1.2.0-vs-v1.1.0.md. The release
   workflow (.github/workflows/release.yml) publishes everything after the first line that is
   exactly `---` as the GitHub release text, so this comment stays out.
 -->
@@ -46,11 +47,20 @@ dotnet add package FuzzyRegex --version 1.2.0
 
 ## Performance
 
-<!-- BDN-PENDING: filled from the 2026-11-02/03 whole-suite run, v1.2.0 against v1.1.0. -->
+Matching speed is unchanged within about 1%. Across the 91 benchmarks of the suite, timed against
+1.1.0 on the same machine in alternating passes, the middle ratio is 1.014, and no benchmark is
+slower beyond run-to-run noise by more than 6%. The slowest are short calls, where the extra
+checks the fixes add weigh most: a cached static `IsMatch` takes 296 ns instead of 286 ns.
 
-Compiling a pattern that has both a lookaround and a capture group allocates 7-12% more than in
-1.1.0, because of the partial matching fix for repeated lookaheads. Matching allocates no more.
-Release 1.3 is planned to remove that cost.
+Two costs in allocation:
+
+- Compiling a pattern that has both a lookaround and a capture group allocates 7-12% more than
+  in 1.1.0, because of the partial matching fix for repeated lookaheads. Other patterns allocate
+  200-300 bytes more per compile.
+- Each `Matches` call allocates about 240 bytes more, once per call and not per match. `Match`
+  and `IsMatch` allocate the same as in 1.1.0.
+
+Release 1.3 is planned to remove both.
 
 ## Known limitations
 

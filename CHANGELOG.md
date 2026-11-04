@@ -23,8 +23,12 @@ inside one another. The public API is unchanged from 1.1.0.
 - **Compiling a pattern that has both a lookaround and a capture group allocates 7-12% more**
   (`(\w+)(?=\w*\d)(?!\d+\b)\w+`: 31,928 to 35,800 bytes). The partial matching fix for D122
   below builds a table of the groups open around each lookaround, and it is built even when no
-  partial call reads it. Matching allocates no more than before. Building it only for partial
-  calls is planned for 1.3 (D135).
+  partial call reads it. Building it only for partial calls is planned for 1.3 (D135).
+- **Each `Matches` call allocates about 240 bytes more**, once per call, not per match (`\w+`
+  over a long text: 2,816 to 3,056 bytes). `Match` and `IsMatch` allocate the same as before.
+  Planned for 1.3 (D138).
+- **Matching speed is unchanged within about 1%** across the benchmark suite, timed against
+  1.1.0 (`bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-04-v1.2.0-vs-v1.1.0.md`).
 
 ### Fixed
 
