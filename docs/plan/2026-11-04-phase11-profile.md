@@ -56,3 +56,27 @@ Items 1-5 are compile- or per-call-cost work that a cached pattern does not pay;
 caches compiled patterns, so they matter most to callers who build patterns per request and to
 `Matches` users who read only the first few matches. Item 6 is where long matching time goes and
 needs its own profile of the fuzzy rows.
+
+## Fuzzy matching profile (added 23:40, main b9c7e502)
+
+WPR, same route; other builds ran, so shares hold and absolute times are indicative (up to 2x).
+
+| Workload | ns/call | Where the time goes |
+|---|---|---|
+| `(?:needle){e<=1}` IsMatch over 1 MB, no match | 116,000-124,000 | `IndexOf` 76%, `Ascii.IsValidCore` 17% (the filter's second pass) |
+| same, Match at the end of 1 MB | 145,000-171,000 | `IndexOf` 81%, `IsValidCore` 11% |
+| `(?:haystack){e<=3}` over a short near miss | 1,280-1,500 | `BasicMatchCore` 22-33%, `RetryFuzzyMatchString` 21%, `FuzzyMatchString` 16% |
+| same with `(?e)` / `(?b)` | 3,180 / 4,100-4,200 | the same three; `(?b)` allocates 544 B per call |
+| `(?i)(?:amber lantern works){e<=2}` over a 77-char record | 1,440-1,540 | `ThisErrorPermitted` 12%, `ScanNextStart` 10% |
+| `(?:(\w+) jumps over){e<=2}` over 44 chars | 48,000-102,000 | greedy-repeat bookkeeping, repeat memo `HashSet` |
+| `(?:a needle in a haystack\.){e<=1}` partial over 1 MB | 191-316 million | no prefilter at all under partial: an attempt at every position |
+
+Targets, ranked by users touched x gain / cost:
+
+1. **`ThisErrorPermitted`/`AnyErrorPermitted` fast path** (Matcher.cs ~9570/~9601): called for every exact character inside a section, not inlined, recomputes totals. A per-section "plain budget" flag (unit costs, no per-type maxima below the total, no nesting, no cost limit) reduces it to one compare. Bound: ~9% (phrase) to ~14% (partial). Low risk.
+2. **Skip the filter's ASCII pass on the no-match path for case-sensitive filters** (FuzzyLiteralFilter.cs ~1059/~1309): an absent piece is a no-match whatever the encoding. Bound: 11-17% of 1 MB scans. Medium risk (surrogates, folding): oracle plus surrogate subjects.
+3. **A prefilter for fuzzy partial searches** (Matcher.cs ~15302 withholds the filter under partial): only a start within `m + insertions` of the slice end can give a partial match; every earlier start needs a whole match, which the filter already decides. Bound: ~1,500x on that workload. High risk: partial matching x fuzzy sections is where 1.2's defects were, so it needs a written proof, the oracle and a differential against main.
+4. Myers scan on short subjects: inconclusive (12.6% in one trace, 0.1% in another); needs an A-B-B-A with an A-A control.
+5. Repeat memo `HashSet` for grouped fuzzy patterns: ~3%.
+
+Ruled out: `BasicMatchCore` prolog zeroing (under 0.5% of each process), exceptions and GC on the matching path.
