@@ -478,23 +478,18 @@ internal static class PatternCompiler
             offset += word.Length;
         }
 
-        if (!parsed.HasSimpleStart())
+        // Get the first set, if possible. With no first set the engine simply scans from every
+        // position.
+        // sync-divergence: upstream catches _FirstSetError here (_regex_core.py:4536) / this tests
+        // for null / a thrown exception was most of a fuzzy pattern's compile (D139). Re-aligning:
+        // see RegexBase.GetFirstset.
+        if (!parsed.HasSimpleStart() && parsed.GetFirstset(reverse) is { } firstset)
         {
-            // Get the first set, if possible.
-            try
+            List<uint> firstsetCode = ParseFunctions.FlattenCode(ParseFunctions.CompileFirstset(info, firstset));
+            flatCode = [.. firstsetCode, .. flatCode];
+            if (optionalPassEnds is not null)
             {
-                List<uint> firstsetCode = ParseFunctions.FlattenCode(
-                    ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
-                );
-                flatCode = [.. firstsetCode, .. flatCode];
-                if (optionalPassEnds is not null)
-                {
-                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
-                }
-            }
-            catch (FirstSetErrorException)
-            {
-                // No usable first set; the engine simply scans from every position.
+                optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
             }
         }
 

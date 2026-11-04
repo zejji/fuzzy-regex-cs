@@ -233,9 +233,21 @@ internal abstract class RegexBase
     /// "this node can match nothing, so look at what follows". Upstream <c>get_firstset</c>.
     /// </summary>
     /// <param name="reverse">Whether the pattern is matched right to left.</param>
-    /// <returns>The first set.</returns>
-    /// <exception cref="FirstSetErrorException">This node cannot contribute one.</exception>
-    internal virtual HashSet<RegexBase?> GetFirstset(bool reverse) => throw new FirstSetErrorException();
+    /// <returns>
+    /// The first set, or <see langword="null"/> when this node cannot contribute one (upstream
+    /// raises <c>_FirstSetError</c>). Every override that recurses returns <see langword="null"/>
+    /// as soon as a child does, which is where upstream's raise would unwind.
+    /// </returns>
+    /// <remarks>
+    /// sync-divergence: upstream's <c>get_firstset</c> raises <c>_FirstSetError</c>
+    /// (<c>upstream/regex/_regex_core.py:69-70, 1986-1987</c>) and <c>_compile</c> catches it
+    /// (<c>:4536</c>) / this returns <see langword="null"/> and
+    /// <see cref="PatternCompiler"/> tests for it / a thrown and caught exception was about 70% of
+    /// constructing a fuzzy pattern (D139). Re-aligning: an upstream override that catches the
+    /// error, or recurses, maps to "test the child's result for <see langword="null"/> and return
+    /// <see langword="null"/>" at the same point.
+    /// </remarks>
+    internal virtual HashSet<RegexBase?>? GetFirstset(bool reverse) => null;
 
     /// <summary>Whether a match here always begins with a single known character. Upstream <c>has_simple_start</c>.</summary>
     /// <returns><see langword="true"/> if it does.</returns>
@@ -316,7 +328,7 @@ internal abstract class ZeroWidthBase(bool positive = true, int encoding = 0) : 
     protected abstract Opcode ZeroWidthOpcode { get; }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [null];
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => [null];
 
     /// <inheritdoc />
     internal override long MaxWidth() => 0;
@@ -701,7 +713,7 @@ internal sealed class Property : RegexBase
     internal int Encoding { get; }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [this];
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => [this];
 
     /// <inheritdoc />
     internal override bool HasSimpleStart() => true;
@@ -1241,7 +1253,7 @@ internal sealed class Atomic : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
 
     /// <inheritdoc />
     internal override bool HasSimpleStart() => Subpattern.HasSimpleStart();
@@ -1493,12 +1505,18 @@ internal class Branch : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse)
     {
         HashSet<RegexBase?> fs = [];
         foreach (RegexBase b in Branches)
         {
-            fs.UnionWith(b.GetFirstset(reverse));
+            HashSet<RegexBase?>? branchFs = b.GetFirstset(reverse);
+            if (branchFs is null)
+            {
+                return null;
+            }
+
+            fs.UnionWith(branchFs);
         }
 
         // Upstream's `return fs or set([None])`.
@@ -2291,7 +2309,7 @@ internal sealed class Character : RegexBase
     internal int[] FoldedCharacters => Folded;
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [this];
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => [this];
 
     /// <inheritdoc />
     internal override bool HasSimpleStart() => true;
@@ -2518,10 +2536,21 @@ internal sealed class Conditional : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse)
     {
-        HashSet<RegexBase?> firstset = YesItem.GetFirstset(reverse);
-        firstset.UnionWith(NoItem.GetFirstset(reverse));
+        HashSet<RegexBase?>? firstset = YesItem.GetFirstset(reverse);
+        if (firstset is null)
+        {
+            return null;
+        }
+
+        HashSet<RegexBase?>? noFirstset = NoItem.GetFirstset(reverse);
+        if (noFirstset is null)
+        {
+            return null;
+        }
+
+        firstset.UnionWith(noFirstset);
         return firstset;
     }
 
@@ -2646,7 +2675,7 @@ internal class String : RegexBase
     internal bool UpstreamFoldingOnly { get; init; }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) =>
         [new Character(Characters[reverse ? Characters.Length - 1 : 0], caseFlags: CaseFlags)];
 
     /// <inheritdoc />
@@ -3086,7 +3115,7 @@ internal sealed class Sequence : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse)
     {
         HashSet<RegexBase?> fs = [];
 
@@ -3099,7 +3128,13 @@ internal sealed class Sequence : RegexBase
 
         foreach (RegexBase s in Items)
         {
-            fs.UnionWith(s.GetFirstset(reverse));
+            HashSet<RegexBase?>? itemFs = s.GetFirstset(reverse);
+            if (itemFs is null)
+            {
+                return null;
+            }
+
+            fs.UnionWith(itemFs);
             if (!fs.Contains(null))
             {
                 return fs;
@@ -3471,7 +3506,7 @@ internal abstract class SetBase(
     internal override RegexBase Optimise(Info info, bool reverse) => Optimise(info, reverse, inSet: false);
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [this];
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => [this];
 
     /// <inheritdoc />
     internal override bool HasSimpleStart() => true;
@@ -4156,7 +4191,7 @@ internal sealed class Group : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
 
     /// <inheritdoc />
     internal override bool HasSimpleStart() => Subpattern.HasSimpleStart();
@@ -4296,7 +4331,7 @@ internal sealed class LookAround : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse) =>
         Positive && Behind == reverse ? Subpattern.GetFirstset(reverse) : [null];
 
     /// <inheritdoc />
@@ -4828,7 +4863,8 @@ internal sealed class Fuzzy : RegexBase
     /// <remarks>
     /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, which makes <c>Fuzzy</c> unhashable
     /// in Python, and nothing puts one in a set: <c>get_firstset</c> is not overridden, so a
-    /// <c>Fuzzy</c> raises <c>_FirstSetError</c> before it could reach one. As with
+    /// <c>Fuzzy</c> raises <c>_FirstSetError</c> before it could reach one (here
+    /// <see cref="RegexBase.GetFirstset"/> returns <see langword="null"/>). As with
     /// <see cref="Branch"/>, hashing the mutable <see cref="Subpattern"/> would break the "a hash
     /// does not change" contract, so this hashes only what the constructor fixes.
     /// </remarks>
@@ -5101,10 +5137,10 @@ internal class GreedyRepeat : RegexBase
     }
 
     /// <inheritdoc />
-    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    internal override HashSet<RegexBase?>? GetFirstset(bool reverse)
     {
-        HashSet<RegexBase?> fs = Subpattern.GetFirstset(reverse);
-        if (MinCount == 0)
+        HashSet<RegexBase?>? fs = Subpattern.GetFirstset(reverse);
+        if (fs is not null && MinCount == 0)
         {
             fs.Add(null);
         }

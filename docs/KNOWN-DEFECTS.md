@@ -56,6 +56,7 @@ regression tests, not these folders, are the lasting proof of each fix.
 
 | # | Defect | Repro (port vs expected) | Stage | Where |
 |---|---|---|---|---|
+| D139 | Performance (compile time), found 2026-11-04 by the phase 11 WPR profile of `new FuzzyRegex(@"(?:needle){e<=1}").IsMatch(short)`, where about 70% of the call was .NET exception dispatch; deferred to release 1.3 (performance). Compiling any pattern whose start has no first set (every fuzzy pattern, and patterns like `.*foo`) threw and caught `FirstSetErrorException`, the port of upstream's `_FirstSetError`. Fix: `RegexBase.GetFirstset` returns `null` instead, each recursing override returns `null` where the raise would have unwound, and `PatternCompiler` tests for it; `FirstSetErrorException` is deleted (sync-divergence comment at the base method). Compiled code identical to main on 9,786 compiles (3,262 patterns from the ported tests plus targeted ones, each plain, `(?r)` and `(?i)`; 657 of them took the exception path on main); a mutation at each of the four propagation sites changes 1 to 115 rows. Measured 2026-11-04, A-B-B-A pinned, 5 s each: `compilefuzzy` 5,406/5,304 ns and 16,232 B per call on main, 3,543/3,502 ns and 15,912 B on the branch; `compile` and `compilelarge` within noise, same bytes. | `new FuzzyRegex("(?:needle){e<=1}")` raises a first-chance `FirstSetErrorException`; expected none | fixed on branch, gates run, awaiting merge | `perf/d139-firstset`; test `Gaps/Parsing/FirstSetWithoutExceptionTests` |
 
 ## Completed
 
