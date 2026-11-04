@@ -274,6 +274,41 @@ public sealed class AllocationTests
         allocated.Should().BeLessThanOrEqualTo(jitCeiling, "nothing reads D101's call and verb facts here");
     }
 
+    /// <summary>
+    /// D138: a <see cref="MatchCollection"/> read only part-way never hands its walk's state back
+    /// to the pattern's cache, so every such <c>Matches</c> call builds a fresh state. Release 1.2
+    /// made that state 240 B bigger than 1.1.0's; the lists a plain or fuzzy pattern never fills
+    /// are now created on first use. The ceilings are v1.1.0 (8de8eaf8)'s counts for the same call
+    /// (Debug, JIT, 2026-11-04); main 0664d20f allocated 3,704, 5,280 and 4,120 B. Native AOT
+    /// allocates differently and has no measured ceiling here, so the test runs under the JIT only.
+    /// </summary>
+    /// <param name="pattern">A pattern with no group call, verb or best match.</param>
+    /// <param name="jitCeiling">v1.1.0's bytes for one call under the JIT, Debug.</param>
+    [Test]
+    [Arguments(@"\w+", 3_456)]
+    [Arguments(@"(\w)+", 5_032)]
+    [Arguments(@"(?:fox){e<=1}", 3_904)]
+    public void A_Matches_call_read_part_way_allocates_no_more_than_1_1_0_did(string pattern, long jitCeiling)
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceilings are the JIT's; Native AOT's were not measured");
+        }
+
+        FuzzyRegex regex = new(pattern);
+        const string subject = "the quick brown fox jumps over the lazy box";
+        _ = regex.Matches(subject)[1];
+
+        long allocated = AllocatedBy(() => () => _ = regex.Matches(subject)[1]);
+
+        allocated
+            .Should()
+            .BeLessThanOrEqualTo(
+                jitCeiling,
+                "a state for a pattern without calls, verbs or BESTMATCH fills none of them"
+            );
+    }
+
     [Test]
     public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
     {
