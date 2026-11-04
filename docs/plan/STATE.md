@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-04 01:55 by Claude Code (item 13 BDN done; note, notes, D138).
+**Updated:** 2026-11-04 22:00 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -38,13 +38,14 @@ pushes need the owner.
 
 ## In flight
 
-- Item 13 BDN: DONE 2026-11-04 01:30 (A-B-B-A + d82base, no standby). Note
-  `bench/baselines/.../2026-11-04-v1.2.0-vs-v1.1.0.md`; D138 (+240 B per `Matches` call) deferred to 1.3. Power settings
-  restored 02:00 (no cap, AC monitor/standby 10 min). Nothing running.
-- Guards not running (reboot 17:25). Deferred: D134, D135 + D138 (1.3), D136, D137.
-- Gates on main (bb408535/ffca17d6): ratchet, AOT suite + smoke, rehearsal, doc examples, tag check GREEN; oracle 7, 4242
-  green, 20261102 one row = D137 (deferred); pack validation fails only Source Link 404s (re-run after the push).
+- Phase 11 step 1 (profile, no code on main) running overnight until 07:40, owner's go 2026-11-04 21:40.
+  WPR traces main vs d82base (scratchpad harness `prof/`), findings go to
+  `docs/plan/2026-11-04-phase11-profile.md`. Prototypes on `perf/*` branches only; nothing merges
+  to main before v1.2.0 is tagged. AC standby/monitor timeouts set to 0: restore to 10 min at 07:40.
+- Peer session s13-33 (future-ide) agreed: it notices full suites, holds heavy work for my timing window on request.
+- Deferred: D134, D135 + D138 (1.3), D136, D137. Gates on main as of ffca17d6 GREEN (pack validation
+  Source Link 404s until the push).
 
 ## Waiting on the owner: a push of main; tag 1.2 after the notes.
 
-**Next action:** item 13 waits on the owner (push, notes review, tag v1.2.0). Then phase 11, release 1.3 (performance): start from the D82/D135/D138 rows in the 1.2 BDN note.
+**Next action:** item 13 waits on the owner (push, notes review, tag v1.2.0). Phase 11: owner fixes the candidate list and end date from the profile note; meanwhile prototypes on `perf/*` branches.
