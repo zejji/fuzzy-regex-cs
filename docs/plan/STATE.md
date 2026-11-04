@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-04 02:10 by Claude Code (item 13 BDN done; note, notes, D138).
+**Updated:** 2026-11-04 01:55 by Claude Code (item 13 BDN done; note, notes, D138).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
