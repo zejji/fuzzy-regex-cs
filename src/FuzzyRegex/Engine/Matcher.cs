@@ -880,6 +880,13 @@ internal static class Matcher
             return answer;
         }
 
+        // D141: only a set member is left without the answers its opcode keeps, and a member is
+        // asked by its set (MatchesMember), never here. A member read here would still be answered
+        // right, by the predicate, but would mean the skip in PatternObject.Compile is unsound.
+        Debug.Assert(
+            node.AsciiAnswers is not null || !HasAsciiAnswers(node.Op, node.Encoding),
+            "a node MatchesOne asks keeps its ASCII answers"
+        );
         return MatchesOneUncached(encoding, node, ch);
     }
 
@@ -927,15 +934,109 @@ internal static class Matcher
                 or Opcode.SetUnionIgn
                 or Opcode.SetUnionIgnRev;
 
-    /// <summary>Fills <see cref="Node.AsciiAnswers"/> by asking the node's predicate about 0-127.</summary>
-    /// <param name="node">A node of a pattern whose compilation is otherwise complete.</param>
-    internal static void FillAsciiAnswers(Node node)
+    /// <summary>
+    /// What a set member's <see cref="Node.AsciiAnswers"/> holds while
+    /// <see cref="FillAsciiAnswers"/> runs: "skip this node". Never
+    /// left on a node.
+    /// </summary>
+    private static readonly ulong[] _setMemberMark = [];
+
+    /// <summary>
+    /// Fills <see cref="Node.AsciiAnswers"/> for every node of a pattern whose compilation is
+    /// otherwise complete, except set members (D141): a member is asked by its set, through
+    /// <see cref="MatchesMember"/>, and only the set's table is read.
+    /// </summary>
+    /// <param name="nodes">The pattern's nodes, numbered.</param>
+    /// <param name="cache">The cache that shares the tables of tests that are not sets.</param>
+    internal static void FillAsciiAnswers(List<Node> nodes, AsciiAnswerCache cache)
     {
-        if (node.AsciiAnswers is not { } answers)
+        foreach (Node node in nodes)
+        {
+            bool isMember = ReferenceEquals(node.AsciiAnswers, _setMemberMark);
+
+            // A set's members hang off its next_2, chained by next_1 (InSetUnion and its siblings
+            // walk them the same way), and BuildSet creates the set before them, so they come later
+            // in the list. A member that came earlier would merely keep a table nobody reads.
+            if (node.Op is >= Opcode.SetDiff and <= Opcode.SetUnionRev)
+            {
+                for (Node? member = node.Next2.Node; member is not null; member = member.Next1.Node)
+                {
+                    Debug.Assert(member.Index > node.Index, "a set is built before its members");
+                    if (member.Index > node.Index)
+                    {
+                        member.AsciiAnswers = _setMemberMark;
+                    }
+                }
+            }
+
+            if (isMember)
+            {
+                node.AsciiAnswers = null;
+                continue;
+            }
+
+            FillNodeAsciiAnswers(node, cache);
+        }
+    }
+
+    /// <summary>
+    /// Fills one node's <see cref="Node.AsciiAnswers"/>, if its opcode keeps them: by asking its
+    /// predicate about 0-127, or, for a test that is not a set, by sharing the table of an earlier
+    /// node with the same <see cref="AsciiAnswerCache.Key"/>.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <param name="cache">The cache.</param>
+    private static void FillNodeAsciiAnswers(Node node, AsciiAnswerCache cache)
+    {
+        if (!HasAsciiAnswers(node.Op, node.Encoding))
         {
             return;
         }
 
+        if (AsciiAnswerCache.KeyOf(node) is not { } key)
+        {
+            // A set: its answers depend on its members, so it fills its own.
+            node.AsciiAnswers = new ulong[2];
+            ComputeAsciiAnswers(node, node.AsciiAnswers);
+            return;
+        }
+
+        if (cache.TryGet(key, out ulong[]? shared))
+        {
+            AssertAsciiAnswers(node, shared);
+            node.AsciiAnswers = shared;
+            return;
+        }
+
+        ulong[] answers = new ulong[2];
+        ComputeAsciiAnswers(node, answers);
+        node.AsciiAnswers = cache.Add(key, answers);
+    }
+
+    /// <summary>Checks, in a Debug build, that a shared table is what the node's own predicate says.</summary>
+    /// <param name="node">The node.</param>
+    /// <param name="shared">The table it is about to share.</param>
+    [Conditional("DEBUG")]
+    private static void AssertAsciiAnswers(Node node, ulong[] shared)
+    {
+        for (uint ch = 0; ch < 128; ch++)
+        {
+            bool kept = ((shared[(int)(ch >> 6)] >> (int)ch) & 1) != 0;
+            Debug.Assert(
+                kept == MatchesOneUncached(node.Encoding, node, ch),
+                "a shared table is what this node's own predicate says"
+            );
+        }
+    }
+
+    /// <summary>Asks <paramref name="node"/>'s predicate about 0-127.</summary>
+    /// <param name="node">The node.</param>
+    /// <param name="answers">
+    /// Two zeroed elements; receives bit <c>ch &amp; 63</c> of element <c>ch &gt;&gt; 6</c> for each
+    /// <c>ch</c> the predicate accepts.
+    /// </param>
+    internal static void ComputeAsciiAnswers(Node node, Span<ulong> answers)
+    {
         for (uint ch = 0; ch < 128; ch++)
         {
             if (MatchesOneUncached(node.Encoding, node, ch))

@@ -277,7 +277,6 @@ internal static class NodeCompiler
             Status = flags << NodeStatus.Shift,
             Step = step,
             Encoding = encoding,
-            AsciiAnswers = Matcher.HasAsciiAnswers(op, encoding) ? new ulong[2] : null,
         };
 
         // Record the new node.
