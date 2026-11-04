@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-04 22:00 by Claude Code (phase 11 profiling started overnight, owner "continue").
+**Updated:** 2026-11-04 22:50 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -42,9 +42,11 @@ pushes need the owner.
   WPR traces main vs d82base (scratchpad harness `prof/`), findings go to
   `docs/plan/2026-11-04-phase11-profile.md`. Prototypes on `perf/*` branches only; nothing merges
   to main before v1.2.0 is tagged. AC standby/monitor timeouts set to 0: restore to 10 min at 07:40.
-- Builders (Opus subagents, background): D139 first set without an exception, worktree `d139`,
-  branch `perf/d139-firstset`; D141 ASCII answers for set members and a leaf cache, worktree `ascii`,
-  branch `perf/ascii-fill`. Next: D140 (leading global flag pre-scan) on top of D139. Sizing in the
+- D139 DONE on `perf/d139-firstset` 70bbcf42 (fuzzy compile -34%, code identical over 9,786
+  compiles; ratchet green; oracle 7, 4242 green, 20261104 one row = D142, also on main). Waits for
+  the 1.2 tag to merge. Builders (Opus, background): D140 flag pre-scan, worktree `d140`, branch
+  `perf/d140-flags` on top of D139; D141 ASCII answers for set members and a leaf cache, worktree `ascii`,
+  branch `perf/ascii-fill`. Sizing in the
   profile note's ranking; a builder that stops leaves WIP on its branch.
 - Peer session s13-33 (future-ide) agreed: it notices full suites, holds heavy work for my timing window on request.
 - Deferred: D134, D135 + D138 (1.3), D136, D137. Gates on main as of ffca17d6 GREEN (pack validation
