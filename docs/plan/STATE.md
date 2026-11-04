@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-04 23:20 by Claude Code (phase 11 profiling started overnight, owner "continue").
+**Updated:** 2026-11-04 23:35 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -46,7 +46,8 @@ pushes need the owner.
   compiles; ratchet green; oracle 7, 4242 green, 20261104 one row = D142, also on main). Waits for
   the 1.2 tag to merge. Builders (Opus, background): D140 flag pre-scan, worktree `d140`, branch
   `perf/d140-flags` on top of D139; D138 lazy MatchState fields, worktree `d138`, branch
-  `perf/d138-lazy-state`. D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
+  `perf/d138-lazy-state`; D143 `ThisErrorPermitted` fast path, worktree `d143`, branch
+  `perf/d143-error-permitted` (profile note, fuzzy targets). D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
   flat; gates green bar D142). A stopped builder leaves WIP on its branch.
 - Peer session s13-33 (future-ide) agreed: it notices full suites, holds heavy work for my timing window on request.
 - Deferred: D134, D135 + D138 (1.3), D136, D137. Gates on main as of ffca17d6 GREEN (pack validation
