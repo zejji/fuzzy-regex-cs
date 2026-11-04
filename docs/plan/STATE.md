@@ -40,7 +40,7 @@ pushes need the owner.
 
 - Item 13 BDN: DONE 2026-11-04 01:30 (A-B-B-A + d82base, no standby). Note
   `bench/baselines/.../2026-11-04-v1.2.0-vs-v1.1.0.md`; D138 (+240 B per `Matches` call) deferred to 1.3. Power settings
-  restored by the 07:17 job (cap 0 now; AC monitor/standby timeouts 0 until then).
+  restored 02:00 (no cap, AC monitor/standby 10 min). Nothing running.
 - Guards not running (reboot 17:25). Deferred: D134, D135 + D138 (1.3), D136, D137.
 - Gates on main (bb408535/ffca17d6): ratchet, AOT suite + smoke, rehearsal, doc examples, tag check GREEN; oracle 7, 4242
   green, 20261102 one row = D137 (deferred); pack validation fails only Source Link 404s (re-run after the push).
