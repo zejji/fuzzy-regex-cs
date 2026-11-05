@@ -615,8 +615,9 @@ public sealed class FuzzyLiteralPrefilterTests
     {
         // The 'é' at 2 stops the first call. From 3 the rest is ASCII, and a stretch that began at
         // 0 must not be stretched over the 'é' to cover it; from 0 again the answer is still that
-        // the filter cannot tell.
-        FuzzyLiteralFilter filter = Build("(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        // the filter cannot tell. Case-insensitive, because only that filter needs the subject to be
+        // ASCII (D144).
+        FuzzyLiteralFilter filter = Build("(?i)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
         const string text = "zzézz abcdefgh";
         FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
 
@@ -657,7 +658,8 @@ public sealed class FuzzyLiteralPrefilterTests
     [Property("Upstream", "none - gap test")]
     public void A_non_ascii_character_is_a_reverse_witness_only_for_a_stretch_holding_it()
     {
-        FuzzyLiteralFilter filter = Build("(?r)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
+        // Case-insensitive: an ordinal filter needs no ASCII subject (D144).
+        FuzzyLiteralFilter filter = Build("(?ri)(?:abcdefgh){e<=1}").FuzzyLiteralFilter!;
         const string text = "zzzzzézzzzzz";
         FuzzyLiteralFilter.ScanMemory memory = filter.NewScanMemory();
 

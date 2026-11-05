@@ -39,15 +39,51 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// <c>Matcher.BasicMatch</c> withholds the filter from partial searches.
 /// </para>
 /// <para>
-/// <b>ASCII only, on both sides.</b> Case-insensitive matching pairs some ASCII letters with
-/// characters that are not ASCII - <c>k</c> with KELVIN SIGN U+212A, <c>s</c> with LONG S U+017F,
-/// and under full case folding <c>ss</c> with U+00DF and <c>fi</c> with U+FB01 - and an ordinal
-/// case-insensitive search sees none of those. Between two ASCII strings it is exact: every fold
-/// the engine applies to an ASCII letter lands on the same letter or its other case, and a Turkic
-/// dotless or dotted I only narrows what matches. So the literal must be ASCII, and every stretch of
-/// subject the filter searches is checked for ASCII first; the first non-ASCII character switches
-/// the filter off for the rest of that search. ASCII also makes code units and characters the same
-/// count, so the offsets need no walk.
+/// <b>ASCII only, on both sides, when case is ignored.</b> Case-insensitive matching pairs some
+/// ASCII letters with characters that are not ASCII - <c>k</c> with KELVIN SIGN U+212A, <c>s</c>
+/// with LONG S U+017F, and under full case folding <c>ss</c> with U+00DF and <c>fi</c> with U+FB01 -
+/// and an ordinal case-insensitive search sees none of those. Between two ASCII strings it is exact:
+/// every fold the engine applies to an ASCII letter lands on the same letter or its other case, and
+/// a Turkic dotless or dotted I only narrows what matches. So the literal must be ASCII, and every
+/// stretch of subject a case-insensitive filter searches is checked for ASCII first; the first
+/// non-ASCII character switches the filter off for the rest of that search. ASCII also makes code
+/// units and characters the same count, so the offsets need no walk.
+/// </para>
+/// <para>
+/// <b>D144: an ordinal filter reads any subject.</b> NOT UPSTREAM, as the whole filter is. When no
+/// node ignores case and every piece is ASCII (<see cref="_anyEncoding"/>), the subject's encoding
+/// matters to one thing only, the start bound, and the full ASCII pass is skipped:
+/// </para>
+/// <list type="number">
+/// <item><description>
+/// The engine compares a case-sensitive value with the text by equality (<c>Matcher.SameChar</c>),
+/// one whole character at a time, a surrogate pair decoded to one (<c>MatchState.CharAt</c>). An
+/// ASCII value equals only that ASCII unit, and an ASCII unit is never half of a pair, so an
+/// untouched piece in a match is exactly an ordinal occurrence of it in the code units. The
+/// one-edit-one-piece argument counts the literal's characters, not the text's, so a subject holding
+/// no piece holds no match whatever else it holds, forwards and in reverse.
+/// </description></item>
+/// <item><description>
+/// The bound does depend on the text. A match starting at <c>p</c> whose untouched piece <c>j</c>
+/// stands at <c>q</c> reads, before it, the literal's <c>offset(j)</c> characters less deletions
+/// plus insertions: at most <c>offset(j) + k</c> characters. One character is one unit except a
+/// high surrogate followed by a low one (<c>MatchState.NextPos</c>); an exact ASCII value reads one
+/// unit, a substitution or an insertion at most two. So <c>p &gt;= q - offset(j) - 2k</c> always.
+/// </description></item>
+/// <item><description>
+/// The search finds the first occurrence <c>f</c> from the query position, so <c>q &gt;= f</c>, and
+/// <c>p &gt;= f - offset(j) - 2k</c> always. If <c>[f - offset(j) - k, f)</c> holds no surrogate,
+/// <c>p &gt;= f - offset(j) - k</c>, the bound for ASCII text: otherwise <c>[p, q)</c> would hold
+/// those <c>offset(j) + k</c> units as as many characters, and at least one more character in front
+/// of them. So that window is checked, cut to the query position; a surrogate there, paired or not,
+/// widens the bound by <c>k</c> and does not switch the filter off.
+/// </description></item>
+/// </list>
+/// <para>
+/// A case-insensitive filter, one with a piece that is not ASCII (a lone character no ASCII
+/// character equals, below), and the bit-parallel scan (<see cref="LiteralScan"/>, whose table is
+/// ASCII and whose lengths are code units) keep the full ASCII checks. Witnesses:
+/// <c>FuzzyLiteralFilterEncodingTests</c>.
 /// </para>
 /// <para>
 /// <b>One exception: a lone character no ASCII character equals.</b> A fuzzy full-folded run holding
@@ -148,8 +184,16 @@ internal sealed class FuzzyLiteralFilter
         _comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         Reverse = reverse;
         _asciiPiece = [.. pieces.Select(static piece => Ascii.IsValid(piece))];
+        _anyEncoding = !ignoreCase && Array.TrueForAll(_asciiPiece, static ascii => ascii);
         _scan = scan;
     }
+
+    /// <summary>
+    /// D144: whether the pieces' answers hold over any subject - no node ignores case and every
+    /// piece is ASCII - so they need no ASCII pass, only a surrogate check near a found piece. See
+    /// the class remarks.
+    /// </summary>
+    private readonly bool _anyEncoding;
 
     /// <summary>
     /// The literal as a bit-parallel scan (C3), or <see langword="null"/> when the literal does not
@@ -905,10 +949,11 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>
     /// The earliest position at or after <paramref name="textPos"/> where a forward match could
     /// start, or <see cref="NoMatch"/> when none can, or <see cref="CannotTell"/> when the stretch
-    /// this call had to search is not all ASCII, or <see cref="Cancelled"/> when the scan found the
-    /// search's budget spent. While the scan is armed the answer depends only on the subject and the
-    /// two positions; <paramref name="memory"/> only saves searching again. A paused scan (see
-    /// <see cref="ScanMemory.ScanPaused"/>) answers with the pieces alone, which is never later.
+    /// this call had to search is not all ASCII (case-insensitive pieces, or the scan; D144), or
+    /// <see cref="Cancelled"/> when the scan found the search's budget spent. While the scan is
+    /// armed the answer depends only on the subject and the two positions; <paramref name="memory"/>
+    /// only saves searching again. A paused scan (see <see cref="ScanMemory.ScanPaused"/>) answers
+    /// with the pieces alone, which is never later.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="textPos">Where the next attempt would start.</param>
@@ -1053,17 +1098,30 @@ internal sealed class FuzzyLiteralFilter
                 memory.Found[j] = at < 0 ? Absent : textPos + at;
             }
 
-            // Everything this piece's search looked at must be ASCII, or its answer is not the
-            // engine's. The found piece's own characters are part of that.
+            // Case-insensitive: everything this piece's search looked at must be ASCII, or its
+            // answer is not the engine's. The found piece's own characters are part of that. An
+            // ordinal search's answer holds over any text (D144, the class remarks).
             int searched = memory.Found[j] == Absent ? sliceEnd : memory.Found[j] + piece.Length;
-            if (searched > textPos && !memory.IsAscii(text, textPos, searched))
+            if (!_anyEncoding && searched > textPos && !memory.IsAscii(text, textPos, searched))
             {
                 return CannotTell;
             }
 
             if (memory.Found[j] != Absent)
             {
-                start = Math.Min(start, (long)memory.Found[j] - Offsets[j] - MaxErrors);
+                int found = memory.Found[j];
+                System.Diagnostics.Debug.Assert(
+                    !_anyEncoding || text.Slice(found, piece.Length).SequenceEqual(piece),
+                    "an ordinal piece is found as its own code units"
+                );
+                long bound = (long)found - Offsets[j] - MaxErrors;
+                if (_anyEncoding && SurrogateIn(text, (int)Math.Max(textPos, bound), found))
+                {
+                    // A character before the piece may be two units: the bound that always holds.
+                    bound -= MaxErrors;
+                }
+
+                start = Math.Min(start, bound);
             }
         }
 
@@ -1071,9 +1129,30 @@ internal sealed class FuzzyLiteralFilter
     }
 
     /// <summary>
+    /// D144: whether <c>[from, to)</c> holds a surrogate, paired or not. A lone one is one unit to
+    /// the engine, so counting it only widens the bound.
+    /// </summary>
+    /// <param name="text">The whole subject.</param>
+    /// <param name="from">The start of the window.</param>
+    /// <param name="to">Its end; an empty window holds none.</param>
+    /// <returns>Whether the window holds a surrogate.</returns>
+    private static bool SurrogateIn(ReadOnlySpan<char> text, int from, int to)
+    {
+        if (to <= from)
+        {
+            return false;
+        }
+
+        WorkCounter.Searched(to - from);
+
+        // The ushort form, as in ScanMemory.IsAscii: the char form of the range searches boxes.
+        return MemoryMarshal.Cast<char, ushort>(text[from..to]).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDFFF) >= 0;
+    }
+
+    /// <summary>
     /// Whether a reverse match could lie anywhere in <c>[sliceStart, textPos)</c>: <see langword="false"/>
-    /// only when that stretch is all ASCII and holds no piece. As with <see cref="NextStart"/>, the
-    /// answer depends only on the subject and the two positions.
+    /// only when that stretch holds no piece and, for a case-insensitive filter, is all ASCII (D144).
+    /// As with <see cref="NextStart"/>, the answer depends only on the subject and the two positions.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="sliceStart">The start of the slice.</param>
@@ -1122,7 +1201,8 @@ internal sealed class FuzzyLiteralFilter
             memory.AbsentBelow[j] = textPos;
         }
 
-        if (!memory.IsAscii(text, sliceStart, textPos))
+        // Case-insensitive only: no piece is no match over any text for an ordinal filter (D144).
+        if (!_anyEncoding && !memory.IsAscii(text, sliceStart, textPos))
         {
             memory.WitnessEnd = memory.AsciiEnd + 1;
             return true;
