@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-04 23:35 by Claude Code (phase 11 profiling started overnight, owner "continue").
+**Updated:** 2026-11-05 00:05 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -44,8 +44,9 @@ pushes need the owner.
   to main before v1.2.0 is tagged. AC standby/monitor timeouts set to 0: restore to 10 min at 07:40.
 - D139 DONE on `perf/d139-firstset` 70bbcf42 (fuzzy compile -34%, code identical over 9,786
   compiles; ratchet green; oracle 7, 4242 green, 20261104 one row = D142, also on main). Waits for
-  the 1.2 tag to merge. Builders (Opus, background): D140 flag pre-scan, worktree `d140`, branch
-  `perf/d140-flags` on top of D139; D138 lazy MatchState fields, worktree `d138`, branch
+  the 1.2 tag to merge. D140 DONE on `perf/d140-flags` be41758f (on D139; `(?e)abc`
+  compile 5.8 to 1.8 us, 309,104 compiles identical; gates green bar D142). Builders (Opus,
+  background): D138 lazy MatchState fields, worktree `d138`, branch
   `perf/d138-lazy-state`; D143 `ThisErrorPermitted` fast path, worktree `d143`, branch
   `perf/d143-error-permitted` (profile note, fuzzy targets). D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
   flat; gates green bar D142). A stopped builder leaves WIP on its branch.
