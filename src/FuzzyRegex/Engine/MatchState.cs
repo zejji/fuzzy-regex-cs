@@ -380,8 +380,9 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// NOT UPSTREAM'S: the ids of the texts the failed-call memo has keyed a backreferenced group on.
     /// See <see cref="CaptureTextIds"/>.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly CaptureTextIds CaptureTexts = new();
+    internal CaptureTextIds? CaptureTexts;
 
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
@@ -396,8 +397,11 @@ internal sealed class MatchState : IDisposable
     /// <summary>NOT UPSTREAM (D94 performance): the repeat-end states known to fail (<c>Matcher.StateKnownToFail</c>).</summary>
     internal HashSet<RepeatStateKey>? FailedRepeatStates;
 
-    /// <summary>NOT UPSTREAM (D94 performance): the keys of the failed-state marks on the backtrack stack.</summary>
-    internal readonly List<RepeatStateKey> MarkedStates = [];
+    /// <summary>
+    /// NOT UPSTREAM (D94 performance): the keys of the failed-state marks on the backtrack stack.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
+    /// </summary>
+    internal List<RepeatStateKey>? MarkedStates;
 
     /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
     internal int SliceStart;
@@ -728,15 +732,17 @@ internal sealed class MatchState : IDisposable
     /// costs O(1) on a recursion ten thousand deep. <see cref="OpenCalls"/> is the same information
     /// as a stack, and is what keeps them in step.
     /// </para>
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </remarks>
-    internal readonly HashSet<(long Key, int Reach)> ActiveCalls = [];
+    internal HashSet<(long Key, int Reach)>? ActiveCalls;
 
     /// <summary>
     /// NOT UPSTREAM'S: <see cref="ActiveCalls"/> for a pattern with a group a conditional or
     /// backreference reads: how many calls are open for each key and reach. Only keys with an open
     /// call are present.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly Dictionary<(long Key, int Reach), int> ActiveCallCounts = [];
+    internal Dictionary<(long Key, int Reach), int>? ActiveCallCounts;
 
     /// <summary>
     /// NOT UPSTREAM'S: the lowest and highest text positions this attempt has reached, read where a
@@ -813,16 +819,18 @@ internal sealed class MatchState : IDisposable
     /// section the call was made in (<see cref="CallSection"/>). Kept only where a call can be made
     /// inside a fuzzy section (<see cref="PatternObject.NestsFuzzySections"/>), so a pattern with no
     /// section pays nothing for it; empty otherwise.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<CallSection> OpenCallSections = [];
+    internal List<CallSection>? OpenCallSections;
 
     /// <summary>
     /// NOT UPSTREAM'S: for each entry of <see cref="OpenCalls"/>, in the same order, the packed span
     /// (<c>Matcher.PackedSpan</c>, -1 when unset) that each group of
     /// <see cref="PatternObject.CallReadGroups"/> held when the call was made. The guard compares
     /// them (<see cref="CallRead"/>) and the failed-call memo keys them; empty when no group is read.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<long> OpenCallSpans = [];
+    internal List<long>? OpenCallSpans;
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): the entry keys of the calls in this pass that ran out of
@@ -861,14 +869,16 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// Where <c>Matcher.FailedCallKey</c> builds a key, kept so a call that is failed at once
     /// allocates nothing.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<long> CallMemoKey = [];
+    internal List<long>? CallMemoKey;
 
     /// <summary>
     /// Where <c>Matcher.FailedCallKey</c> collects the open calls its key holds, as indexes into
     /// <see cref="OpenCalls"/>, kept so building a key allocates nothing.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<int> CallMemoAncestors = [];
+    internal List<int>? CallMemoAncestors;
 
     /// <summary>
     /// NOT UPSTREAM'S (the failed-call memo): how many calls the memo has failed at once since the
@@ -897,14 +907,16 @@ internal sealed class MatchState : IDisposable
     /// <summary>
     /// Upstream <c>best_fuzzy_counts</c> (<c>:11501</c>): the errors the best POSIX match so far
     /// spent, saved beside its groups so that restoring the match restores what it cost.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly long[] BestFuzzyCounts = new long[FuzzyValue.Count];
+    internal long[]? BestFuzzyCounts;
 
     /// <summary>
     /// The changes the best POSIX match so far made. <b>Upstream has no counterpart and that is the
     /// point of it</b> - see <c>Matcher.SaveBestMatch</c>.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<FuzzyChange> BestFuzzyChanges = [];
+    internal List<FuzzyChange>? BestFuzzyChanges;
 
     /// <summary>
     /// The running <see cref="TotalErrors"/> and <see cref="TotalCost"/> of the best POSIX match so
@@ -997,8 +1009,9 @@ internal sealed class MatchState : IDisposable
     /// match of a finditer re-reads the rest of the text looking for a better match that is not
     /// there, which is quadratic (KNOWN-DEFECTS D115). Kept for the whole scan; <see cref="Init"/>
     /// empties it. <c>Matcher.BestWalkKnownToFail</c> says what a fact proves.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<BestWalkFailure> BestWalkFailures = [];
+    internal List<BestWalkFailure>? BestWalkFailures;
 
     /// <summary>
     /// NOT UPSTREAM'S, D115: how many facts <see cref="BestWalkFailures"/> keeps. A walk tries one
@@ -1605,6 +1618,22 @@ internal sealed class MatchState : IDisposable
     internal CharacterIndex GetCharacterIndex() => _characterIndex ??= new CharacterIndex(this);
 
     /// <summary>
+    /// <see cref="CaptureTexts"/>, made on first use (D138) and numbering the texts of the
+    /// subject being matched.
+    /// </summary>
+    /// <returns>The table.</returns>
+    internal CaptureTextIds GetCaptureTexts()
+    {
+        if (CaptureTexts is null)
+        {
+            CaptureTexts = new CaptureTextIds();
+            CaptureTexts.Reset(Text);
+        }
+
+        return CaptureTexts;
+    }
+
+    /// <summary>
     /// The allocating half of <c>state_init_2</c> (<c>upstream/src/_regex.c</c> line 18275): the
     /// storage whose size depends on the pattern and not on the subject, which is what
     /// <see cref="MatchStateCache"/> keeps from one call to the next.
@@ -1822,8 +1851,8 @@ internal sealed class MatchState : IDisposable
         TextLength = text.Length;
         LastSubstitutablePos = int.MinValue; // D94 performance: worked out on first use
         FailedRepeatStates?.Clear();
-        MarkedStates.Clear();
-        CaptureTexts.Reset(text);
+        MarkedStates?.Clear();
+        CaptureTexts?.Reset(text);
         Array.Clear(_tailTextValues); // the ids above start again (D85)
 
         // Nothing is searched here: NoHighSurrogateIn looks only as far as the match asks (D83).
@@ -1876,15 +1905,15 @@ internal sealed class MatchState : IDisposable
         // Every pass writes its slot before its end reads it, so this is for reuse alone.
         Array.Clear(OptionalPasses);
 
-        ActiveCalls.Clear();
-        ActiveCallCounts.Clear();
+        ActiveCalls?.Clear();
+        ActiveCallCounts?.Clear();
         OpenCalls.Clear();
-        OpenCallSections.Clear();
-        OpenCallSpans.Clear();
+        OpenCallSections?.Clear();
+        OpenCallSpans?.Clear();
         FailedCalls = null;
         NegativeOutcomes?.Clear();
         CallOutcomes?.Clear();
-        CallTracks.Clear();
+        CallTracks?.Clear();
         if (
             TailsLive
             || TailStamp != 0
@@ -1897,8 +1926,8 @@ internal sealed class MatchState : IDisposable
         }
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
-        CallMemoKey.Clear();
-        CallMemoAncestors.Clear();
+        CallMemoKey?.Clear();
+        CallMemoAncestors?.Clear();
         VerbMarks.Clear();
         CallMemoHits = 0;
         ReachedLow = int.MaxValue;
@@ -1909,14 +1938,18 @@ internal sealed class MatchState : IDisposable
         BestMatchPos = 0;
         BestTextPos = 0;
         BestMatchGroups = null;
-        Array.Clear(BestFuzzyCounts);
-        BestFuzzyChanges.Clear();
+        if (BestFuzzyCounts is not null)
+        {
+            Array.Clear(BestFuzzyCounts);
+        }
+
+        BestFuzzyChanges?.Clear();
         BestTotalErrors = 0;
         BestTotalCost = 0;
         MaxErrors = 0;
         MaxCost = 0;
         BoundlessBodies = 0;
-        BestWalkFailures.Clear();
+        BestWalkFailures?.Clear();
         OneAttempt = false;
         HeldMaxErrors = 0;
         HeldMaxCost = 0;
@@ -2114,7 +2147,7 @@ internal sealed class MatchState : IDisposable
         }
 
         Text = default;
-        CaptureTexts.Reset(default);
+        CaptureTexts?.Reset(default);
         Array.Clear(_tailTextValues);
         _characterIndex = null;
         BestMatchGroups = null;
@@ -2125,7 +2158,7 @@ internal sealed class MatchState : IDisposable
         FailedCalls = null;
         NegativeOutcomes?.Clear();
         CallOutcomes?.Clear();
-        CallTracks.Clear();
+        CallTracks?.Clear();
         ClearTheTails();
     }
 
@@ -2497,8 +2530,9 @@ internal sealed class MatchState : IDisposable
     /// NOT UPSTREAM'S, D101: what each open group call has done so far, one entry per entry of
     /// <see cref="OpenCalls"/>, while <see cref="PatternObject.MemoisesCallOutcomes"/> keeps call
     /// outcomes in a partial call's second pass.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<CallOutcomeTrack> CallTracks = [];
+    internal List<CallOutcomeTrack>? CallTracks;
 
     /// <summary>
     /// NOT UPSTREAM'S, D101: the outcomes of the calls <see cref="CallTracks"/> followed to their end in
@@ -2551,8 +2585,9 @@ internal sealed class MatchState : IDisposable
     /// NOT UPSTREAM'S, D101 option D: the tails being explored, oldest first, each until
     /// backtracking pops the entry its visit pushed. A cut that discards the entry leaves its track
     /// behind; the next push or record above it drops it.
+    /// Null until first use (D138), so a state that never needs it allocates nothing for it.
     /// </summary>
-    internal readonly List<TailTrack> TailTracks = [];
+    internal List<TailTrack>? TailTracks;
 
     /// <summary>NOT UPSTREAM'S, D101 option D: the visit deciding now, followed once it pushes its entry.</summary>
     internal TailTrack PendingTail;
@@ -2629,7 +2664,7 @@ internal sealed class MatchState : IDisposable
 
         if (TailsLive)
         {
-            TailTracks.Clear();
+            TailTracks?.Clear();
             HasPendingTail = false;
             PendingTail = default;
             TailsLive = false;
@@ -2645,7 +2680,7 @@ internal sealed class MatchState : IDisposable
     private void ResetTheTails()
     {
         TailRanOut?.Clear();
-        TailTracks.Clear();
+        TailTracks?.Clear();
         HasPendingTail = false;
         PendingTail = default;
         TailsLive = false;
@@ -2688,11 +2723,11 @@ internal sealed class MatchState : IDisposable
     {
         NegativeOutcomes?.Clear();
         CallOutcomes?.Clear();
-        CallTracks.Clear();
+        CallTracks?.Clear();
         ClearTheTails();
         // Reset the stacks. A pass that succeeded leaves its marks with its stack (D11).
         WMarks.Clear();
-        MarkedStates.Clear();
+        MarkedStates?.Clear();
         LookaroundSuccesses.Clear();
         Sstack.Reset();
         SetBstackCount(0);

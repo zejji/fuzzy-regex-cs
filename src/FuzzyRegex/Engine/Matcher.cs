@@ -4382,9 +4382,10 @@ internal static class Matcher
         state.BestTextPos = state.TextPos;
         state.FoundMatch = true;
 
-        state.FuzzyCounts.CopyTo(state.BestFuzzyCounts, 0);
-        state.BestFuzzyChanges.Clear();
-        state.BestFuzzyChanges.AddRange(state.FuzzyChanges);
+        state.FuzzyCounts.CopyTo(state.BestFuzzyCounts ??= new long[FuzzyValue.Count], 0);
+        List<FuzzyChange> bestChanges = state.BestFuzzyChanges ??= [];
+        bestChanges.Clear();
+        bestChanges.AddRange(state.FuzzyChanges);
 
         // And the two running totals the ranking modes read, which upstream leaves stale - see
         // 'RestoreBestMatch'.
@@ -4416,9 +4417,10 @@ internal static class Matcher
 
         // Upstream's `fuzzy_counts` copy (:11575), plus the CHANGES copy upstream does not have.
         // Both, or the match reports errors it cannot account for. See 'SaveBestMatch'.
-        state.BestFuzzyCounts.CopyTo(state.FuzzyCounts, 0);
+        // FoundMatch is set only by SaveBestMatch, which made both.
+        state.BestFuzzyCounts!.CopyTo(state.FuzzyCounts, 0);
         state.FuzzyChanges.Clear();
-        state.FuzzyChanges.AddRange(state.BestFuzzyChanges);
+        state.FuzzyChanges.AddRange(state.BestFuzzyChanges!);
 
         // AND THE TWO RUNNING TOTALS, WHICH UPSTREAM LEAVES STALE - ledger entry 9's remaining
         // port-side bug, fixed here (S48b). 'restore_best_match' (:11565) copies 'fuzzy_counts' and
@@ -5337,24 +5339,20 @@ internal static class Matcher
 
         // NOT UPSTREAM'S, D101: a call backtracked past has tried everything; see
         // PatternObject.MemoisesCallOutcomes.
-        if (state.CallTracks.Count != 0)
+        if (state.CallTracks is { Count: > 0 } tracks)
         {
-            Debug.Assert(state.CallTracks.Count == state.OpenCalls.Count, "D101: one track per open call");
-            (bool returned, bool touched, bool crossedAnyway, long lowestBody) = state.CallTracks[^1];
-            state.CallTracks.RemoveAt(state.CallTracks.Count - 1);
+            Debug.Assert(tracks.Count == state.OpenCalls.Count, "D101: one track per open call");
+            (bool returned, bool touched, bool crossedAnyway, long lowestBody) = tracks[^1];
+            tracks.RemoveAt(tracks.Count - 1);
             bool ranOut = crossedAnyway || state.OpenCalls[^1].SstackDepth > lowestBody;
 
             // Every run-out this call saw was taken while its caller was open too. A re-opened
             // call's own Touched is set without a run-out, so what it hands on is the run-outs
             // alone: LowestBody is below long.MaxValue exactly when one was taken.
-            if (lowestBody != long.MaxValue && state.CallTracks.Count != 0)
+            if (lowestBody != long.MaxValue && tracks.Count != 0)
             {
-                MatchState.CallOutcomeTrack caller = state.CallTracks[^1];
-                state.CallTracks[^1] = caller with
-                {
-                    Touched = true,
-                    LowestBody = Math.Min(caller.LowestBody, lowestBody),
-                };
+                MatchState.CallOutcomeTrack caller = tracks[^1];
+                tracks[^1] = caller with { Touched = true, LowestBody = Math.Min(caller.LowestBody, lowestBody) };
             }
 
             if (backtrackedPast && !returned && (ranOut || !touched))
@@ -5366,25 +5364,25 @@ internal static class Matcher
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         if (state.Pattern.NestsFuzzySections)
         {
-            state.OpenCallSections.RemoveAt(state.OpenCallSections.Count - 1);
+            state.OpenCallSections!.RemoveAt(state.OpenCallSections.Count - 1);
         }
         int readCount = state.Pattern.CallReadGroups.Length;
         if (!CountsOpenCalls(state.Pattern))
         {
-            bool removed = state.ActiveCalls.Remove((key, reach));
+            bool removed = state.ActiveCalls!.Remove((key, reach));
             Debug.Assert(removed, "ActiveCalls holds exactly the entries OpenCalls does");
             return (key, reach);
         }
 
         // One lookup in the common case, where this was the only open call with its key and reach.
-        bool counted = state.ActiveCallCounts.Remove((key, reach), out int open);
+        bool counted = state.ActiveCallCounts!.Remove((key, reach), out int open);
         Debug.Assert(counted && open > 0, "ActiveCallCounts counts exactly the calls OpenCalls holds");
         if (open > 1)
         {
             state.ActiveCallCounts[(key, reach)] = open - 1;
         }
 
-        CollectionsMarshal.SetCount(state.OpenCallSpans, state.OpenCallSpans.Count - readCount);
+        CollectionsMarshal.SetCount(state.OpenCallSpans!, state.OpenCallSpans!.Count - readCount);
         return (key, reach);
     }
 
@@ -5404,11 +5402,11 @@ internal static class Matcher
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
         if (!CountsOpenCalls(state.Pattern))
         {
-            return state.ActiveCalls.Add((key, reach));
+            return (state.ActiveCalls ??= []).Add((key, reach));
         }
 
         ref int open = ref CollectionsMarshal.GetValueRefOrAddDefault(
-            state.ActiveCallCounts,
+            state.ActiveCallCounts ??= [],
             (key, reach),
             out bool exists
         );
@@ -5418,9 +5416,10 @@ internal static class Matcher
         }
 
         ++open;
-        int at = state.OpenCallSpans.Count;
-        CollectionsMarshal.SetCount(state.OpenCallSpans, at + readGroups.Length);
-        Span<long> spans = CollectionsMarshal.AsSpan(state.OpenCallSpans)[at..];
+        List<long> openSpans = state.OpenCallSpans ??= [];
+        int at = openSpans.Count;
+        CollectionsMarshal.SetCount(openSpans, at + readGroups.Length);
+        Span<long> spans = CollectionsMarshal.AsSpan(openSpans)[at..];
         for (int g = 0; g < readGroups.Length; g++)
         {
             spans[g] = PackedSpan(state.Groups[readGroups[g].Index]);
@@ -5440,12 +5439,12 @@ internal static class Matcher
     {
         if (!CountsOpenCalls(state.Pattern))
         {
-            bool reopened = state.ActiveCalls.Add((key, reach));
+            bool reopened = (state.ActiveCalls ??= []).Add((key, reach));
             Debug.Assert(reopened, "backtracking has closed every call opened after this one returned");
             return;
         }
 
-        ++CollectionsMarshal.GetValueRefOrAddDefault(state.ActiveCallCounts, (key, reach), out _);
+        ++CollectionsMarshal.GetValueRefOrAddDefault(state.ActiveCallCounts ??= [], (key, reach), out _);
     }
 
     /// <summary>
@@ -5470,7 +5469,7 @@ internal static class Matcher
                 || (
                     state.Pattern.NestsFuzzySections
                     && (
-                        state.OpenCallSections[i].Frame == section.Frame
+                        state.OpenCallSections![i].Frame == section.Frame
                         || state.Pattern.CallGuardComparesAcrossSections
                     )
                     && !SameCounts(state.OpenCallSections[i], section)
@@ -5483,7 +5482,7 @@ internal static class Matcher
             bool same = true;
             for (int g = 0; g < readGroups.Length && same; g++)
             {
-                long then = state.OpenCallSpans[(i * readGroups.Length) + g];
+                long then = state.OpenCallSpans![(i * readGroups.Length) + g];
                 long now = PackedSpan(state.Groups[readGroups[g].Index]);
                 same = SameRead(state, then, now, readGroups[g].Read);
             }
@@ -5574,7 +5573,7 @@ internal static class Matcher
     {
         if (length > 3)
         {
-            return state.CaptureTexts.IdOf(start, length);
+            return state.GetCaptureTexts().IdOf(start, length);
         }
 
         ReadOnlySpan<char> text = state.Text.Span.Slice(start, length);
@@ -5701,7 +5700,7 @@ internal static class Matcher
         }
 
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
-        List<long> key = state.CallMemoKey;
+        List<long> key = state.CallMemoKey ??= [];
         key.Clear();
 
         long[] counts = state.FuzzyCounts;
@@ -5809,7 +5808,7 @@ internal static class Matcher
         int reach = state.ReachedWidth;
         bool sections = state.Pattern.NestsFuzzySections;
         CallSection sectionNow = sections ? CallSectionAt(state) : default;
-        List<int> ancestors = state.CallMemoAncestors;
+        List<int> ancestors = state.CallMemoAncestors ??= [];
         ancestors.Clear();
         for (int i = 0; i < state.OpenCalls.Count; i++)
         {
@@ -5846,7 +5845,7 @@ internal static class Matcher
             // oracle's ablation, its counts.
             if (sections)
             {
-                CallSection section = state.OpenCallSections[i];
+                CallSection section = state.OpenCallSections![i];
                 key.Add(section.Frame == sectionNow.Frame ? 1 : 0);
                 if (state.Pattern.CallGuardComparesAcrossSections)
                 {
@@ -5876,7 +5875,7 @@ internal static class Matcher
     private static long OpenReadValue(MatchState state, int call, int group)
     {
         (int Index, CallRead Read)[] readGroups = state.Pattern.CallReadGroups;
-        return ReadValue(state, state.OpenCallSpans[(call * readGroups.Length) + group], readGroups[group].Read);
+        return ReadValue(state, state.OpenCallSpans![(call * readGroups.Length) + group], readGroups[group].Read);
     }
 
     /// <summary>
@@ -5898,7 +5897,7 @@ internal static class Matcher
     /// <returns><see langword="false"/> if it can never refuse such a call.</returns>
     private static bool SectionCouldRefuseInside(MatchState state, int call, CallSection now)
     {
-        CallSection then = state.OpenCallSections[call];
+        CallSection then = state.OpenCallSections![call];
         return then.Frame != now.Frame || state.Pattern.CallGuardComparesAcrossSections || SameCounts(then, now);
     }
 
@@ -5936,7 +5935,7 @@ internal static class Matcher
         bool spansMoveOneWay = !state.Pattern.CapturesAgainstDirection;
         for (int g = 0; g < readGroups.Length; g++)
         {
-            long then = state.OpenCallSpans[(call * readGroups.Length) + g];
+            long then = state.OpenCallSpans![(call * readGroups.Length) + g];
             GroupData group = state.Groups[readGroups[g].Index];
             bool unsetThen = then == -1;
             if (unsetThen != (group.Current < 0))
@@ -6016,7 +6015,7 @@ internal static class Matcher
     /// <returns>The key to record if the call fails, or <see langword="null"/>.</returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static long[]? FailedCallKeyToRecord(MatchState state) =>
-        (state.FailedCalls?.Count ?? 0) < _failedCallCap ? [.. state.CallMemoKey] : null;
+        (state.FailedCalls?.Count ?? 0) < _failedCallCap ? [.. state.CallMemoKey!] : null;
 
     /// <summary>
     /// A group call has run out of choices: records its entry key in the failed-call memo, if the
@@ -10508,7 +10507,7 @@ internal static class Matcher
             return true;
         }
 
-        state.MarkedStates.Add(key);
+        (state.MarkedStates ??= []).Add(key);
         state.Bstack.PushUInt8((byte)Opcode.FailedStateMark);
         return false;
     }
@@ -15529,21 +15528,21 @@ internal static class Matcher
         // NOT UPSTREAM'S, and the same shape as the clear above: a fresh attempt has no group call
         // open, and the abandoned one may have left some - a verb that cuts the backtracking drops
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
-        state.ActiveCalls.Clear();
+        state.ActiveCalls?.Clear();
         state.OpenCalls.Clear();
-        state.CallTracks.Clear();
+        state.CallTracks?.Clear();
         if (state.TailsLive)
         {
-            state.TailTracks.Clear();
+            state.TailTracks?.Clear();
             state.HasPendingTail = false;
             state.TailsLive = false;
         }
 
-        state.OpenCallSections.Clear();
+        state.OpenCallSections?.Clear();
         if (CountsOpenCalls(state.Pattern))
         {
-            state.ActiveCallCounts.Clear();
-            state.OpenCallSpans.Clear();
+            state.ActiveCallCounts?.Clear();
+            state.OpenCallSpans?.Clear();
         }
 
         state.ReachedLow = int.MaxValue;
@@ -17787,7 +17786,7 @@ internal static class Matcher
 
                     break;
                 case Opcode.FailedStateMark: // NOT UPSTREAM (D94 performance): see StateKnownToFail.
-                    state.FailedRepeatStates!.Add(state.MarkedStates[^1]);
+                    state.FailedRepeatStates!.Add(state.MarkedStates![^1]);
                     state.MarkedStates.RemoveAt(state.MarkedStates.Count - 1);
                     break;
                 case Opcode.RunOutClosedSection: // NOT UPSTREAM'S, D11 chunk 8: the body's section again.
@@ -19827,7 +19826,7 @@ internal static class Matcher
 
         if (
             !CountsOpenCalls(pattern)
-                ? !state.ActiveCalls.Add((groupCallKey, groupCallReach))
+                ? !(state.ActiveCalls ??= []).Add((groupCallKey, groupCallReach))
                 : !TryOpenCall(state, groupCallKey, groupCallReach, groupCallSection)
         )
         {
@@ -19863,7 +19862,7 @@ internal static class Matcher
         );
         if (TracksCallOutcomes(state))
         {
-            state.CallTracks.Add(MatchState.CallOutcomeTrack.Opened);
+            (state.CallTracks ??= []).Add(MatchState.CallOutcomeTrack.Opened);
         }
 
         state.OpenCalls.Add(
@@ -19882,7 +19881,7 @@ internal static class Matcher
         }
         if (groupCallSections)
         {
-            state.OpenCallSections.Add(groupCallSection);
+            (state.OpenCallSections ??= []).Add(groupCallSection);
         }
 
         // D101 (design note E4): a partial call's second pass builds no failed-call key, since the
@@ -19987,7 +19986,7 @@ internal static class Matcher
             state.Bstack.PushSize(state.OpenCalls[^1].BstackAt);
             if (pattern.NestsFuzzySections)
             {
-                PushCallSection(state.Bstack, state.OpenCallSections[^1]);
+                PushCallSection(state.Bstack, state.OpenCallSections![^1]);
             }
             foreach (long span in CollectionsMarshal.AsSpan(state.OpenCallSpans)[^readGroupCount..])
             {
@@ -20297,7 +20296,7 @@ internal static class Matcher
     private static void FollowTheTail(MatchState state)
     {
         int at = state.Bstack.Count;
-        List<MatchState.TailTrack> tracks = state.TailTracks;
+        List<MatchState.TailTrack> tracks = state.TailTracks ??= [];
         while (tracks.Count != 0 && tracks[^1].BstackAt >= at)
         {
             tracks.RemoveAt(tracks.Count - 1);
@@ -20316,7 +20315,11 @@ internal static class Matcher
     private static void RecordTheTail(MatchState state)
     {
         int at = state.Bstack.Count;
-        List<MatchState.TailTrack> tracks = state.TailTracks;
+        if (state.TailTracks is not { } tracks)
+        {
+            return;
+        }
+
         while (tracks.Count != 0 && tracks[^1].BstackAt > at)
         {
             tracks.RemoveAt(tracks.Count - 1);
@@ -20423,7 +20426,7 @@ internal static class Matcher
         }
 
         Debug.Assert(
-            state.CallTracks.Count == 0 || state.CallTracks[^1].Touched,
+            state.CallTracks is not { Count: > 0 } || state.CallTracks[^1].Touched,
             "D101 option D: RunOut noted the run-out in the frame's call track before the cut"
         );
         RecordTheTailsOfACutFrame(state, bstackAt, state.OpenCalls.Count);
@@ -20497,7 +20500,11 @@ internal static class Matcher
     /// <param name="depth">The frame's depth.</param>
     private static void RecordTheTailsOfACutFrame(MatchState state, int bstackAt, int depth)
     {
-        List<MatchState.TailTrack> tracks = state.TailTracks;
+        if (state.TailTracks is not { } tracks)
+        {
+            return;
+        }
+
         while (tracks.Count != 0 && tracks[^1].BstackAt >= bstackAt)
         {
             MatchState.TailTrack track = tracks[^1];
@@ -20558,7 +20565,7 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     private static void NoteARunOutInTheOpenCalls(MatchState state)
     {
-        Debug.Assert(state.CallTracks.Count == state.OpenCalls.Count, "D101: one track per open call");
+        Debug.Assert((state.CallTracks?.Count ?? 0) == state.OpenCalls.Count, "D101: one track per open call");
         long body = -1;
         for (int offset = state.Pstack.Count - sizeof(long); offset >= 0; offset -= sizeof(long))
         {
@@ -20576,11 +20583,11 @@ internal static class Matcher
             }
         }
 
-        if (state.CallTracks.Count != 0)
+        if (state.CallTracks is { Count: > 0 } tracks)
         {
             WorkCounter.CallTracksWritten(1);
-            MatchState.CallOutcomeTrack track = state.CallTracks[^1];
-            state.CallTracks[^1] = track with { Touched = true, LowestBody = Math.Min(track.LowestBody, body) };
+            MatchState.CallOutcomeTrack track = tracks[^1];
+            tracks[^1] = track with { Touched = true, LowestBody = Math.Min(track.LowestBody, body) };
         }
     }
 
@@ -21413,9 +21420,12 @@ internal static class Matcher
         {
             // Backtracking into the call re-opens it, so its key, reach, section and
             // captures come back off the backtracking stack.
-            int groupReturnBackSpans = state.OpenCallSpans.Count;
-            CollectionsMarshal.SetCount(state.OpenCallSpans, groupReturnBackSpans + readGroupCount);
-            Span<long> groupReturnBackValues = CollectionsMarshal.AsSpan(state.OpenCallSpans)[groupReturnBackSpans..];
+            List<long> groupReturnBackOpenSpans = state.OpenCallSpans ??= [];
+            int groupReturnBackSpans = groupReturnBackOpenSpans.Count;
+            CollectionsMarshal.SetCount(groupReturnBackOpenSpans, groupReturnBackSpans + readGroupCount);
+            Span<long> groupReturnBackValues = CollectionsMarshal.AsSpan(groupReturnBackOpenSpans)[
+                groupReturnBackSpans..
+            ];
             for (int i = readGroupCount - 1; i >= 0; i--)
             {
                 if (!state.Bstack.PopSize(out groupReturnBackValues[i]))
@@ -21471,7 +21481,7 @@ internal static class Matcher
             // It has returned, so it is not one the failed-call memo may record, nor D101's.
             if (TracksCallOutcomes(state))
             {
-                state.CallTracks.Add(
+                (state.CallTracks ??= []).Add(
                     new MatchState.CallOutcomeTrack(Returned: true, Touched: true, RanOut: true, long.MaxValue)
                 );
             }
@@ -21488,7 +21498,7 @@ internal static class Matcher
             );
             if (pattern.NestsFuzzySections)
             {
-                state.OpenCallSections.Add(groupReturnBackSection);
+                (state.OpenCallSections ??= []).Add(groupReturnBackSection);
             }
 
             /* sstack: caller_repeats capture_change caller_captures return_node
@@ -22275,7 +22285,7 @@ internal static class Matcher
     private static int RunOut(MatchState state, ref Node node, ref int stringPos, int gfoldedPos, int foldChangesStart)
     {
         PatternObject pattern = state.Pattern;
-        if (state.CallTracks.Count != 0)
+        if (state.CallTracks is { Count: > 0 })
         {
             NoteARunOutInTheOpenCalls(state);
         }
@@ -26496,13 +26506,13 @@ internal static class Matcher
     /// </returns>
     private static int BestWalkKnownToFail(MatchState state, int start)
     {
-        if (state.BestWalkFailures.Count == 0 || !BestWalkCanRemember(state))
+        if (state.BestWalkFailures is not { Count: > 0 } facts || !BestWalkCanRemember(state))
         {
             return _walkSearchUnknown;
         }
 
         int found = _walkSearchUnknown;
-        foreach (MatchState.BestWalkFailure fact in state.BestWalkFailures)
+        foreach (MatchState.BestWalkFailure fact in facts)
         {
             if (
                 fact.SliceStart != state.SliceStart
@@ -26551,7 +26561,7 @@ internal static class Matcher
             return;
         }
 
-        List<MatchState.BestWalkFailure> facts = state.BestWalkFailures;
+        List<MatchState.BestWalkFailure> facts = state.BestWalkFailures ??= [];
         var fact = new MatchState.BestWalkFailure(
             start,
             state.MaxErrors,
