@@ -35,8 +35,10 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// bound leaves, and the attempts are independent because the pattern holds nothing but the
 /// literal - no verb, no group, no anchor. Reverse, <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> choose
 /// among matches, and every candidate holds an untouched piece, so they keep the filter. A partial
-/// match does not: it can be a prefix of the literal holding no whole piece, so
-/// <c>Matcher.BasicMatch</c> withholds the filter from partial searches.
+/// match does not: it can be a prefix of the literal holding no whole piece. But it runs out at the
+/// end of the text, so it starts within <see cref="PartialReach"/> units of it, and a forward
+/// partial search starts each attempt at the earlier of the filter's answer and that bound (D145,
+/// <c>Matcher.BasicMatchCore</c>). A reverse partial search does without the filter.
 /// </para>
 /// <para>
 /// <b>ASCII only, on both sides, when case is ignored.</b> Case-insensitive matching pairs some
@@ -103,8 +105,8 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// literal ends, then the leftmost place one starts. Where the pieces would be shorter than
 /// <see cref="MinPieceLength"/> it is the whole filter; otherwise it reads only a window after each
 /// piece answer, from a scan's second query on (<see cref="NextStart"/>). The argument is the same as the pieces': every match is within <c>k</c> edits, so a
-/// position no such stretch starts at holds none. Partial matching is refused for the same reason
-/// as the pieces. A batch of queries that saves less than it reads pauses the scan for a while
+/// position no such stretch starts at holds none. A partial match is let through by the same bound
+/// as for the pieces. A batch of queries that saves less than it reads pauses the scan for a while
 /// (<see cref="ScanMemory.CountScan"/>). Design and evidence:
 /// <c>docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md</c>.
 /// </para>
@@ -230,6 +232,83 @@ internal sealed class FuzzyLiteralFilter
     // the mirror is the upgrade when a long reverse fuzzy search is measured.
     internal bool Reverse { get; }
 
+    /// <summary>
+    /// D145: how many code units of subject a forward attempt can read before it runs out at the
+    /// end of the text, so that a partial match starts no earlier than <c>TextEnd - PartialReach</c>.
+    /// <c>w + 2k</c>, where <c>w</c> is the most any literal weighs, counting an ASCII value as one
+    /// and any other value as two, and <c>k</c> is <see cref="MaxErrors"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An attempt reads the subject three ways. A substitution reads one character, two units at
+    /// most, in place of at least one value. An insertion reads one character and no value; a
+    /// deletion reads nothing. A character read without an error is matched against values that
+    /// weigh at least its length: a character of the Basic Multilingual Plane is one unit and
+    /// weighs at least one value; an astral character, two units, either equals a value ignoring
+    /// case, which is then not ASCII (U+1DF95 equals <c>ß</c> in the Unicode 18 tables), or folds to
+    /// two values or more (U+1DF95 folds to <c>ss</c>) or to one that is not ASCII. No value is
+    /// astral (<see cref="LiteralWalk"/>), and the table facts are checked for every astral
+    /// character by <c>FuzzyLiteralPartialFilterTests.An_astral_character_read_without_an_error_weighs_two_values</c>.
+    /// A partial match has used at most one literal's values and made at most <c>k</c>
+    /// substitutions and insertions together (<see cref="MostErrors"/>), so it read at most
+    /// <c>w + 2k</c> units.
+    /// </para>
+    /// <para>
+    /// So a forward partial search may start every attempt at the earlier of the filter's answer
+    /// and <c>TextEnd - PartialReach</c>: no complete match starts before the first, and no partial
+    /// one before the second (<c>Matcher.BasicMatchCore</c>). <c>Matcher.BasicMatch</c> asserts the
+    /// second on every partial answer.
+    /// </para>
+    /// </remarks>
+    internal int PartialReach { get; private init; }
+
+    /// <summary>D145 A6: whether every literal has more units than <paramref name="maxErrors"/>.</summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>.</param>
+    /// <returns>Whether no literal can be deleted whole.</returns>
+    private static bool EveryLiteralOutlastsItsErrors(LiteralWalk walk, long maxErrors)
+    {
+        foreach (LiteralPath literal in walk.Literals)
+        {
+            long units = 0;
+            foreach (bool start in literal.UnitStarts)
+            {
+                units += start ? 1 : 0;
+            }
+
+            if (units <= maxErrors)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="PartialReach"/> for a walk, saturating at <see cref="int.MaxValue"/>.
+    /// </summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>, at least 0.</param>
+    /// <returns><c>w + 2k</c>.</returns>
+    private static int PartialReachOf(LiteralWalk walk, long maxErrors)
+    {
+        // Loops, not LINQ: compiling '(?:needle){e<=1}' is pinned to its bytes (AllocationTests).
+        long heaviest = 0;
+        foreach (LiteralPath literal in walk.Literals)
+        {
+            long weight = 0;
+            foreach (uint value in literal.Values)
+            {
+                weight += value <= 0x7F ? 1 : 2;
+            }
+
+            heaviest = Math.Max(heaviest, weight);
+        }
+
+        return (int)Math.Min(int.MaxValue, heaviest + (2 * maxErrors));
+    }
+
     private readonly StringComparison _comparison;
 
     /// <summary>
@@ -264,15 +343,31 @@ internal sealed class FuzzyLiteralFilter
         // C3: the scan stands alone where the pieces would be too short, and checks the pieces'
         // hits where they are not. Either alone is a filter; neither is none.
         LiteralScan? scan = LiteralScan.ForLiteral(walk, maxErrors);
+
+        // D145 A6: no filtered pattern matches empty, so a partial search's scan never meets an
+        // empty match and its must-advance rule. Each deletion removes one unit, and every literal
+        // has more than k units: the pieces need k + 1 of them (Cut, 'units.Count < pieceCount'),
+        // and the scan alone needs k < m single-value units (LiteralScan.ForLiteral). Checked
+        // below for the literals the filter is built from; Debug only, as Debug.Assert's argument.
         (string[] Pieces, int[] Offsets)? cut = Cut(walk, maxErrors);
+        System.Diagnostics.Debug.Assert(
+            (cut is null && scan is null) || EveryLiteralOutlastsItsErrors(walk, maxErrors),
+            "D145 A6: every literal of a filtered pattern has more units than errors, so it cannot match empty"
+        );
         if (cut is not { } found)
         {
             return scan is null
                 ? null
-                : new FuzzyLiteralFilter([], [], (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+                : new FuzzyLiteralFilter([], [], (int)maxErrors, walk.IgnoreCase, isReverse, scan)
+                {
+                    PartialReach = PartialReachOf(walk, maxErrors),
+                };
         }
 
-        return new FuzzyLiteralFilter(found.Pieces, found.Offsets, (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+        return new FuzzyLiteralFilter(found.Pieces, found.Offsets, (int)maxErrors, walk.IgnoreCase, isReverse, scan)
+        {
+            PartialReach = PartialReachOf(walk, maxErrors),
+        };
     }
 
     /// <summary>
