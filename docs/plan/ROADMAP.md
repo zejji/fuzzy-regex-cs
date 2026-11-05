@@ -910,6 +910,13 @@ release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
   is precisely what phase 7 rewrites. It stays a one-off measurement with a written verdict, never
   a merge gate - partly for runtime, partly because Stryker.NET reaches TUnit only through its
   Microsoft Testing Platform runner, which is still preview as of 4.16.0.
+- **Transpositions as a fuzzy error kind (post-1.3, owner decision 2026-11-05).** A swap of two
+  adjacent characters counted as one error, opt-in through a `FuzzyRegexOptions` flag or an explicit
+  `t` in a constraint, off by default so no existing pattern changes meaning. It is the first pattern
+  syntax upstream lacks (mrab-regex #400 asks for it, unanswered since 2021), so the differential
+  oracle cannot judge it and it needs its own reference matcher. Cost: a fourth error kind through
+  the engine, the literal prefilter's soundness argument to redo, and a new
+  `FuzzyCounts.Transpositions`. Proposal and open questions: `2026-11-05-transpositions-design.md`.
 
 ## Phase boundaries are human checkpoints
 
