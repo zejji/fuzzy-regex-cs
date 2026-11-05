@@ -15550,6 +15550,13 @@ internal static class Matcher
                     state
                 );
 
+                // D145 A9: only a search reaches this line ('fuzzyFilter' is null otherwise), so
+                // only a search's starts move. The anchored attempts of a partial call - the one from
+                // inside the text to come (MatchFromInsideTheTextToCome, at the edge, which is TextEnd
+                // there) and rule H''s attempt at the anchor (DoMatch2LiftingTheAnchorBan, which a
+                // filtered pattern such as '(?:ab){i<=1}' does run) - start where they always did.
+                // Neither needs the tail: the reach bound holds for any attempt, search or not, and
+                // BasicMatch's D145 assertion checks every partial either one answers.
                 // D145: a partial match starts at or after the tail, so the search also tries every
                 // start from there. No complete match starts before 'next' (the filter's soundness),
                 // and none at all when it is NoMatch, which it answers only over ASCII it searched.

@@ -218,6 +218,29 @@ internal sealed class FuzzyLiteralFilter
     /// </remarks>
     internal int PartialReach { get; private init; }
 
+    /// <summary>D145 A6: whether every literal has more units than <paramref name="maxErrors"/>.</summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>.</param>
+    /// <returns>Whether no literal can be deleted whole.</returns>
+    private static bool EveryLiteralOutlastsItsErrors(LiteralWalk walk, long maxErrors)
+    {
+        foreach (LiteralPath literal in walk.Literals)
+        {
+            long units = 0;
+            foreach (bool start in literal.UnitStarts)
+            {
+                units += start ? 1 : 0;
+            }
+
+            if (units <= maxErrors)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// <see cref="PartialReach"/> for a walk, saturating at <see cref="int.MaxValue"/>.
     /// </summary>
@@ -276,7 +299,17 @@ internal sealed class FuzzyLiteralFilter
         // C3: the scan stands alone where the pieces would be too short, and checks the pieces'
         // hits where they are not. Either alone is a filter; neither is none.
         LiteralScan? scan = LiteralScan.ForLiteral(walk, maxErrors);
+
+        // D145 A6: no filtered pattern matches empty, so a partial search's scan never meets an
+        // empty match and its must-advance rule. Each deletion removes one unit, and every literal
+        // has more than k units: the pieces need k + 1 of them (Cut, 'units.Count < pieceCount'),
+        // and the scan alone needs k < m single-value units (LiteralScan.ForLiteral). Checked
+        // below for the literals the filter is built from; Debug only, as Debug.Assert's argument.
         (string[] Pieces, int[] Offsets)? cut = Cut(walk, maxErrors);
+        System.Diagnostics.Debug.Assert(
+            (cut is null && scan is null) || EveryLiteralOutlastsItsErrors(walk, maxErrors),
+            "D145 A6: every literal of a filtered pattern has more units than errors, so it cannot match empty"
+        );
         if (cut is not { } found)
         {
             return scan is null
