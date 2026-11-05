@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-05 00:50 by Claude Code (phase 11 profiling started overnight, owner "continue").
+**Updated:** 2026-11-05 01:00 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -49,7 +49,9 @@ pushes need the owner.
   `perf/d138-lazy-state` 123f57a5 (`Matches(s)[1]` -600 B, now under 1.1.0; prolog unchanged; gates
   green bar D142; timing indicative, re-time with LHM). Note: AllocationTests lookaround row
   `\b(?=\w*\d)(?!\d+\b)\w+` fails when run alone (27,680 > 27,664 B), on main too; passes in the suite.
-  Builders (Opus, background): D144 filter ASCII pass, worktree `d144`, branch `perf/d144-filter-ascii`; D145 fuzzy partial prefilter
+  D144 DONE on `perf/d144-filter-ascii` 717b174f (ordinal filter works over non-ASCII text:
+  1 MB non-ASCII search 155 ms to 74 us, ASCII scans -12% to -16%; 60k-case differential identical;
+  gates green bar D142); blind refutation review running. Builders (Opus, background): D145 fuzzy partial prefilter
   (proof + blind refutation passed, ~1,500x on 1 MB partial), worktree `d145`, branch
   `perf/d145-partial-filter`. D143 DONE on `perf/d143-error-permitted` bd5a1eb4 (fuzzy matching
   -5% to -12%, ratchet green); its oracle still running detached, log `d143/.scratch/oracle.log`. D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
