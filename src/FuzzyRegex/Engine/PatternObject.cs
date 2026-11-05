@@ -1683,11 +1683,9 @@ internal sealed class PatternObject
         BranchChain.Build(self.NodeList);
 
         // NOT UPSTREAM'S (S62): last, so every node and every set member is final. See
-        // Node.AsciiAnswers.
-        foreach (Node node in self.NodeList)
-        {
-            Matcher.FillAsciiAnswers(node);
-        }
+        // Node.AsciiAnswers. A set member is skipped (D141): its set is asked, through
+        // Matcher.MatchesMember, and only the set's answers are read.
+        Matcher.FillAsciiAnswers(self.NodeList, AsciiAnswerCache.Shared);
 
         return self;
     }

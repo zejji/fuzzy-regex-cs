@@ -9,7 +9,8 @@ namespace Fuzzy.Text.RegularExpressions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>This is the library's only shared mutable state</b>, which is why it is a class of its own
+/// <b>This is one of the library's two pieces of shared mutable state</b> (the other is
+/// <see cref="Engine.AsciiAnswerCache"/>, D141), which is why it is a class of its own
 /// rather than a handful of statics on <see cref="FuzzyRegex"/>: the thread-safety contract in
 /// <see cref="FuzzyRegex"/>'s remarks is permanent, and every path that can mutate the cache is in
 /// this file and holds <see cref="_gate"/> while it does. A <see cref="FuzzyRegex"/> is immutable,
