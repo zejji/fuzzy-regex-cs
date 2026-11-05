@@ -75,6 +75,20 @@ internal static class AsciiAnswers
         }
     }
 
+    /// <summary>A property node's answers as an array shared by every node of that property.</summary>
+    /// <param name="node">A node of a pattern whose compilation is otherwise complete.</param>
+    /// <returns>The array, which nothing may write, or <see langword="null"/> for any other node.</returns>
+    internal static ulong[]? Shared(Node node) =>
+        node.Op switch
+        {
+            Opcode.Property or Opcode.PropertyRev => AsciiPropertyAnswers.Shared(ignoreCase: false, node.Values[0]),
+            Opcode.PropertyIgn or Opcode.PropertyIgnRev => AsciiPropertyAnswers.Shared(
+                ignoreCase: true,
+                node.Values[0]
+            ),
+            _ => null,
+        };
+
     /// <summary>
     /// The ASCII answers of <see cref="Matcher.SameCharIgn"/> with <paramref name="character"/>:
     /// the character itself if ASCII, with its other case if a letter; for LONG S and KELVIN SIGN

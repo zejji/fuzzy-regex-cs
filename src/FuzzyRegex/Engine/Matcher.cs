@@ -979,11 +979,15 @@ internal static class Matcher
                 continue;
             }
 
-            // D141: a formula or the property table where there is one, else (a set) the predicate.
-            ulong[] answers = new ulong[2];
-            if (!AsciiAnswers.TryFill(node, answers))
+            // D141: a property's shared array; else a formula; else (a set) the predicate.
+            ulong[]? answers = AsciiAnswers.Shared(node);
+            if (answers is null)
             {
-                ComputeAsciiAnswers(node, answers);
+                answers = new ulong[2];
+                if (!AsciiAnswers.TryFill(node, answers))
+                {
+                    ComputeAsciiAnswers(node, answers);
+                }
             }
 
             AssertAsciiAnswers(node, answers);

@@ -159,6 +159,81 @@ public sealed class AsciiAnswersTests
     }
 
     [Test]
+    public void Every_property_node_reads_the_generated_table()
+    {
+        // D141: a property code with no slot in AsciiPropertyAnswers would still be answered right,
+        // by the predicate, but would silently lose the table. Every code the parser builds must
+        // have one.
+        int properties = 0;
+
+        using (new AssertionScope())
+        {
+            foreach (string source in Corpus().Concat(_propertySources))
+            {
+                foreach (
+                    Node node in Build(source)
+                        .NodeList.Where(static node =>
+                            node.Op
+                                is Opcode.Property
+                                    or Opcode.PropertyRev
+                                    or Opcode.PropertyIgn
+                                    or Opcode.PropertyIgnRev
+                        )
+                )
+                {
+                    ++properties;
+                    AsciiAnswers.Shared(node).Should().NotBeNull($"{source} 0x{node.Values[0]:X8}");
+                }
+            }
+        }
+
+        properties.Should().BeGreaterThan(100);
+    }
+
+    [Test]
+    public void Nodes_of_one_property_share_one_table_array()
+    {
+        // D141 (A2): a property's table is one array per distinct answer set for the process, so
+        // compiling \w does not allocate one. The plain and case-insensitive forms of \p{Lu} differ.
+        Node[] words = Tables(Build(@"\w+@\w+"));
+        Node plain = Tables(Build(@"\p{Lu}"))[0];
+        Node ignoreCase = Tables(Build(@"(?i)\p{Lu}"))[0];
+
+        // Each \w is a repeat body and its optimiser test node, so there are more than two.
+        words.Should().HaveCountGreaterThanOrEqualTo(2);
+        words.Should().OnlyContain(node => ReferenceEquals(node.AsciiAnswers, words[0].AsciiAnswers));
+        ignoreCase.AsciiAnswers.Should().NotBeSameAs(plain.AsciiAnswers);
+        ignoreCase.AsciiAnswers.Should().NotEqual(plain.AsciiAnswers);
+
+        static Node[] Tables(PatternObject pattern) =>
+            [
+                .. pattern
+                    .NodeList.Where(static node => node.AsciiAnswers is not null)
+                    .OrderBy(static node => node.Index),
+            ];
+    }
+
+    // Property spellings beyond the corpus: POSIX classes, binary properties, scripts, blocks and
+    // negated forms, each a different path through ParseFunctions.LookupProperty.
+    private static readonly string[] _propertySources =
+    [
+        "[[:alpha:]]x",
+        "[[:^digit:]]x",
+        @"\p{Alphabetic}",
+        @"\P{Alphabetic}",
+        @"\p{Script=Han}",
+        @"\p{InBasicLatin}",
+        @"\p{Blk=Greek}",
+        @"\p{IsLatin}",
+        @"\p{Any}",
+        @"\p{Assigned}",
+        @"\p{Hex_Digit}",
+        @"(?i)\p{Lt}",
+        @"(?a)\w",
+        @"(?u:\d)",
+    ];
+
+    [Test]
     public void A_locale_node_keeps_no_ascii_answers()
     {
         Build(@"(?L)\w").NodeList.Should().NotContain(static node => node.AsciiAnswers != null);
