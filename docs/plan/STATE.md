@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-05 02:35 by Claude Code (phase 11 profiling started overnight, owner "continue").
+**Updated:** 2026-11-05 02:40 by Claude Code (phase 11 profiling started overnight, owner "continue").
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26). Main carries 1.2's fixes, VersionPrefix 1.2.0.
 **Now:** phase 10, release 1.2 (correctness), scope frozen 2026-11-01 (`ROADMAP.md`; decisions in
 `DECISIONS.md` 2026-11-01). Next, phase 11: release 1.3 (performance).
@@ -57,6 +57,14 @@ pushes need the owner.
   6025, 6099 diverge identically on main, registered D146-D149 (deferred). D143 DONE on `perf/d143-error-permitted` bd5a1eb4 (fuzzy matching
   -5% to -12%, ratchet green; oracle 7, 4242 green, 20261104 only D142). D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
   flat; gates green bar D142). A stopped builder leaves WIP on its branch.
+- Integration `perf/phase11-integration` 27a147d9 (worktree `p11`): D139-D144 merged, ratchet
+  10223/10223 GREEN, oracle only D142; quick timing compile -20%, fuzzy compile -34%, Matches -11%
+  and -600 B, phrase/nomatch -12%. The D145 merge is IN PROGRESS uncommitted in `p11` (MERGE_HEAD
+  eb555b33, staged, gates not run): finish with `git commit`, then the gates.
+- BDN running: runner PID 39296 `.scratch/s1024/bdn-p11.ps1`, log `bdn-p11.log`, heartbeat
+  `bdn-p11-heartbeat.ps1`; A-B-B-A main (worktree `bdn-p11main`) vs 27a147d9 (`bdn-p11int`), whole
+  suite, ~63 min a pass, ends ~06:45. CPU capped 4000 MHz (PROCFREQMAX AC): restore to 0 at 07:25.
+  No builds, tests or commits while it runs.
 - Peer session s13-33 (future-ide) agreed: it notices full suites, holds heavy work for my timing window on request.
 - Deferred: D134, D135 + D138 (1.3), D136, D137. Gates on main as of ffca17d6 GREEN (pack validation
   Source Link 404s until the push).
