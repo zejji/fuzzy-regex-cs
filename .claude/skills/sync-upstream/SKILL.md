@@ -69,8 +69,12 @@ becomes untrustworthy.
 
 Never hand-edit generated tables. A UCD version bump is:
 
-1. drop the new UCD data files into the generator's input directory,
-2. `dotnet run --project src/FuzzyRegex.UnicodeGenerator`,
+1. `python tools/transliterate-unicode.py`, which writes `src/FuzzyRegex/Unicode/*.g.cs` from
+   upstream's `src/_regex_unicode.c`; for a new UCD version, also `tools/build-character-names.py`
+   and `tools/build-lowercase.py` against the new UCD files,
+2. regenerate the ASCII property table (D141), which is built from the predicates over those
+   tables: run `AsciiPropertyAnswersTableTests` with `FUZZYREGEX_REGENERATE=1` (its remarks give
+   the command), rebuild, and run it again without the variable,
 3. run the oracle tests (`tests/FuzzyRegex.OracleTests`), which compare every property, script
    and block against Python across all planes,
 4. commit the regenerated tables and the new UCD version together.

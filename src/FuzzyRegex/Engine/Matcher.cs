@@ -947,8 +947,7 @@ internal static class Matcher
     /// <see cref="MatchesMember"/>, and only the set's table is read.
     /// </summary>
     /// <param name="nodes">The pattern's nodes, numbered.</param>
-    /// <param name="cache">The cache that shares the tables of tests that are not sets.</param>
-    internal static void FillAsciiAnswers(List<Node> nodes, AsciiAnswerCache cache)
+    internal static void FillAsciiAnswers(List<Node> nodes)
     {
         foreach (Node node in nodes)
         {
@@ -975,56 +974,39 @@ internal static class Matcher
                 continue;
             }
 
-            FillNodeAsciiAnswers(node, cache);
+            if (!HasAsciiAnswers(node.Op, node.Encoding))
+            {
+                continue;
+            }
+
+            // D141: a property's shared array; else a formula; else (a set) the predicate.
+            ulong[]? answers = AsciiAnswers.Shared(node);
+            if (answers is null)
+            {
+                answers = new ulong[2];
+                if (!AsciiAnswers.TryFill(node, answers))
+                {
+                    ComputeAsciiAnswers(node, answers);
+                }
+            }
+
+            AssertAsciiAnswers(node, answers);
+            node.AsciiAnswers = answers;
         }
     }
 
-    /// <summary>
-    /// Fills one node's <see cref="Node.AsciiAnswers"/>, if its opcode keeps them: by asking its
-    /// predicate about 0-127, or, for a test that is not a set, by sharing the table of an earlier
-    /// node with the same <see cref="AsciiAnswerCache.Key"/>.
-    /// </summary>
+    /// <summary>Checks, in a Debug build, that a table is what the node's own predicate says.</summary>
     /// <param name="node">The node.</param>
-    /// <param name="cache">The cache.</param>
-    private static void FillNodeAsciiAnswers(Node node, AsciiAnswerCache cache)
-    {
-        if (!HasAsciiAnswers(node.Op, node.Encoding))
-        {
-            return;
-        }
-
-        if (AsciiAnswerCache.KeyOf(node) is not { } key)
-        {
-            // A set: its answers depend on its members, so it fills its own.
-            node.AsciiAnswers = new ulong[2];
-            ComputeAsciiAnswers(node, node.AsciiAnswers);
-            return;
-        }
-
-        if (cache.TryGet(key, out ulong[]? shared))
-        {
-            AssertAsciiAnswers(node, shared);
-            node.AsciiAnswers = shared;
-            return;
-        }
-
-        ulong[] answers = new ulong[2];
-        ComputeAsciiAnswers(node, answers);
-        node.AsciiAnswers = cache.Add(key, answers);
-    }
-
-    /// <summary>Checks, in a Debug build, that a shared table is what the node's own predicate says.</summary>
-    /// <param name="node">The node.</param>
-    /// <param name="shared">The table it is about to share.</param>
+    /// <param name="answers">The table it is about to keep.</param>
     [Conditional("DEBUG")]
-    private static void AssertAsciiAnswers(Node node, ulong[] shared)
+    private static void AssertAsciiAnswers(Node node, ulong[] answers)
     {
         for (uint ch = 0; ch < 128; ch++)
         {
-            bool kept = ((shared[(int)(ch >> 6)] >> (int)ch) & 1) != 0;
+            bool kept = ((answers[(int)(ch >> 6)] >> (int)ch) & 1) != 0;
             Debug.Assert(
                 kept == MatchesOneUncached(node.Encoding, node, ch),
-                "a shared table is what this node's own predicate says"
+                "a table is what this node's own predicate says"
             );
         }
     }

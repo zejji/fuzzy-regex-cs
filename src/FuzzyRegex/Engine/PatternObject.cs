@@ -1685,7 +1685,7 @@ internal sealed class PatternObject
         // NOT UPSTREAM'S (S62): last, so every node and every set member is final. See
         // Node.AsciiAnswers. A set member is skipped (D141): its set is asked, through
         // Matcher.MatchesMember, and only the set's answers are read.
-        Matcher.FillAsciiAnswers(self.NodeList, AsciiAnswerCache.Shared);
+        Matcher.FillAsciiAnswers(self.NodeList);
 
         return self;
     }
