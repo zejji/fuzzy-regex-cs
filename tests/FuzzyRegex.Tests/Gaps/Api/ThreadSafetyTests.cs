@@ -1036,7 +1036,8 @@ public sealed class ThreadSafetyTests
             // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
             // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
             // pattern compiles; one byte holds the two, and (D10) Node.SavesOnlyForCalls, set by
-            // NodeCompiler.BuildLookaround and read only by the oracle.
+            // NodeCompiler.BuildLookaround and read only by the oracle; and (D143)
+            // Node.HasPlainErrorBudget, set by NodeCompiler.BuildFuzzy.
             "Node._flags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
