@@ -96,6 +96,20 @@ internal static class WorkCounter
     internal static long SearchStartCalls { get; private set; }
 
     /// <summary>
+    /// D145: attempts of a forward partial search on this thread that started at the fuzzy literal
+    /// filter's partial tail, before the filter's own answer (<c>FuzzyLiteralFilter.PartialReach</c>).
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long FilterStartsHeldBack { get; private set; }
+
+    /// <summary>
+    /// D145: times on this thread the fuzzy literal filter found no complete match in the rest of a
+    /// forward partial search and the search went on from its partial tail instead of failing.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long FilterNoMatchTails { get; private set; }
+
+    /// <summary>
     /// Times an ignore-case leading-string screen gave way to its code units on this thread because
     /// it skipped too little (C6 option B; <c>Matcher.LeadingStringsSkipTooLittle</c>).
     /// </summary>
@@ -226,6 +240,14 @@ internal static class WorkCounter
     /// <summary>Counts one call of the start-position prefilter.</summary>
     [Conditional("DEBUG")]
     internal static void SearchStartCalled() => SearchStartCalls++;
+
+    /// <summary>Counts one D145 attempt started at the filter's partial tail.</summary>
+    [Conditional("DEBUG")]
+    internal static void FilterStartHeldBack() => FilterStartsHeldBack++;
+
+    /// <summary>Counts one D145 filter no-match that went on from the partial tail.</summary>
+    [Conditional("DEBUG")]
+    internal static void FilterNoMatchTail() => FilterNoMatchTails++;
 
     /// <summary>Counts one fall-back from ignore-case leading strings to their code units.</summary>
     [Conditional("DEBUG")]

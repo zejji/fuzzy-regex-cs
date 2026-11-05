@@ -9302,6 +9302,20 @@ internal static class Matcher
     private const long _secondPassStackBudget = 1L << 28;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D145: the longest <see cref="FuzzyLiteralFilter.PartialReach"/> for which a
+    /// forward partial search keeps the filter. The tail it starts from is sound only if no attempt
+    /// before it answers a partial, and the one partial that is not a run-out is the stack budget's
+    /// (<see cref="SecondPassStackIsOverBudget"/>), which answers at the attempt's start. A filtered
+    /// pattern is one fuzzy section of literals with no lookaround, atomic group, verb or condition,
+    /// so it forks nowhere (<see cref="CountFork"/>), and its stacks hold a frame of tens of bytes
+    /// per node entered and per error made (<see cref="FuzzyMatchString"/>, <see cref="FuzzyInsert"/>),
+    /// a matched run of a string pushing nothing per character: far below the 256 MB budget for a
+    /// reach of 65,536 units. A longer literal keeps the search as it was. Asserted where the budget
+    /// fires.
+    /// </summary>
+    private const int _maxFilteredPartialReach = 1 << 16;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 M4 (design section 4.4): counts one fork of the current attempt, a
     /// blocked construct that keeps more than one outcome (a blocked cut, a skipped verb, a negative
     /// lookaround or test that passes undetermined, a condition that takes both branches). Past
@@ -9331,6 +9345,10 @@ internal static class Matcher
     private static void CountFork(MatchState state)
     {
         Debug.Assert(state.PartialSide != MatchState.PartialNone, "D11 A6: only the second pass forks");
+        Debug.Assert(
+            state.Pattern.FuzzyLiteralFilter is null,
+            "D145 A4: a pattern the fuzzy literal filter reads has nothing that forks"
+        );
         if (++state.Forks > 256L * (state.InitialSliceEnd - state.InitialSliceStart + 1) && !state.ForkBudgetSpent)
         {
             state.ForkBudgetSpent = true;
@@ -9378,6 +9396,10 @@ internal static class Matcher
             return false;
         }
 
+        Debug.Assert(
+            state.Pattern.FuzzyLiteralFilter is not { Reverse: false, PartialReach: <= _maxFilteredPartialReach },
+            "D145 A10: the stack budget never fires in a pattern whose partial search the filter starts"
+        );
         state.ForkBudgetSpent = true;
         state.NotePartialEvent(PartialEvent.StackBudgetFired);
         return true;
@@ -14850,6 +14872,16 @@ internal static class Matcher
             "D11 M4: a partial with the fork budget spent comes from ForkBudgetPartial"
         );
 
+        // D145: the premise of the filter's partial tail. Every partial of a forward attempt at a
+        // filtered pattern, a budget's included, started within the filter's reach of the end.
+        Debug.Assert(
+            status != MatchStatus.Partial
+                || state.PartialSide != MatchState.PartialRight
+                || state.Pattern.FuzzyLiteralFilter is not { Reverse: false } partialFilter
+                || state.AttemptStart >= state.TextEnd - partialFilter.PartialReach,
+            "D145: a partial starts within the filter's partial reach of the end of the text"
+        );
+
         // C6: the premise of the leading screen (PatternObject.FindLeadingStrings), checked on
         // every whole match of a pattern that has one, screened or not: the match starts on one
         // of the literals. A match found where the screen does not run, such as a match call, is
@@ -15295,12 +15327,24 @@ internal static class Matcher
 
         bool doSearchStart = state.DoSearchStart && searchStartAllowed && !state.OneAttempt;
 
-        // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
-        // withheld from a partial match, which can be a prefix of the literal holding no whole
-        // piece. What it learns lives on the state, across every attempt of every call of the scan
-        // (D14). See FuzzyLiteralFilter.
+        // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only. What it
+        // learns lives on the state, across every attempt of every call of the scan (D14). See
+        // FuzzyLiteralFilter. A partial match can be a prefix of the literal holding no whole
+        // piece, but it runs out at the end of the text, so in a forward partial search (D145) it
+        // starts within the filter's PartialReach of TextEnd, and each attempt below starts at the
+        // earlier of the filter's answer and that tail. A reverse partial search does without it.
+        // The reach is capped so that an attempt's stacks stay far below the second pass's budget
+        // (_maxFilteredPartialReach), whose partial could otherwise answer at a start the tail skips.
         FuzzyLiteralFilter? fuzzyFilter =
-            search && state.PartialSide == MatchState.PartialNone && !state.OneAttempt
+            search
+            && !state.OneAttempt
+            && (
+                state.PartialSide == MatchState.PartialNone
+                || (
+                    state.PartialSide == MatchState.PartialRight
+                    && pattern.FuzzyLiteralFilter is { Reverse: false, PartialReach: <= _maxFilteredPartialReach }
+                )
+            )
                 ? pattern.FuzzyLiteralFilter
                 : null;
 
@@ -15505,6 +15549,32 @@ internal static class Matcher
                     state.FilterMemory!,
                     state
                 );
+
+                // D145: a partial match starts at or after the tail, so the search also tries every
+                // start from there. No complete match starts before 'next' (the filter's soundness),
+                // and none at all when it is NoMatch, which it answers only over ASCII it searched.
+                if (state.PartialSide == MatchState.PartialRight && next is >= 0 or FuzzyLiteralFilter.NoMatch)
+                {
+                    Debug.Assert(
+                        state.SearchSliceEnd <= state.TextEnd,
+                        "D145 A3: no attempt starts past the end of the text a partial runs out at"
+                    );
+                    int tail = Math.Max(foundPos, state.TextEnd - fuzzyFilter.PartialReach);
+                    if (next == FuzzyLiteralFilter.NoMatch)
+                    {
+                        if (tail <= state.SearchSliceEnd)
+                        {
+                            WorkCounter.FilterNoMatchTail();
+                            next = tail;
+                        }
+                    }
+                    else if (tail < next)
+                    {
+                        WorkCounter.FilterStartHeldBack();
+                        next = tail;
+                    }
+                }
+
                 if (next == FuzzyLiteralFilter.NoMatch)
                 {
                     return MatchStatus.Failure;
