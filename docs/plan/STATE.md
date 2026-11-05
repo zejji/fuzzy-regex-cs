@@ -23,7 +23,7 @@ measurement, WPR profiles and benchmarks.
 | 10 | `(?b)` 544 B per call | - | not started | |
 | 11 | Myers on short subjects | - | not started | A-B-B-A with A-A control decides |
 | 12 | Repeat memo `HashSet` (~3%) | - | not started | |
-| 13 | Design note: reuse an abandoned `Matches` state (b') | - | not started | note only |
+| 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 
 "Green" = ratchet GREEN and oracle 3 seeds with only D142 diverging (identical on main). Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
