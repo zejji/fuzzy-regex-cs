@@ -48,14 +48,13 @@ pushes need the owner.
   (worktree `p11`); the D145 merge is staged, uncommitted, in `p11`: `git commit`, then gates.
 - BDN DONE 06:46 (A-B-B-A main vs 27a147d9): suite geomean 0.961, best 0.650
   (`UncachedFuzzyIsMatch`), nothing slower beyond noise; note
-  `bench/baselines/.../2026-11-05-phase11-integration-vs-main.md`. New D150:
-  `ConditionalPerTokenNoMemo` 0 to 504 B per call on the integration branch, not traced.
+  `bench/baselines/.../2026-11-05-phase11-integration-vs-main.md`. D150 (504 B on one row) traced
+  and closed as BDN noise: one launch of four, 0 B per call outside BDN on every tree.
 - Deferred: D134, D135, D136, D137, D142, D146-D149. Gates on main as of ffca17d6 GREEN (pack validation
   Source Link 404s until the push).
 
 ## Waiting on the owner: a push of main; tag 1.2 after the notes.
 
 **Next action:** item 13 waits on the owner (push, notes review, tag v1.2.0). Phase 11: the owner
-reviews the profile note and the BDN note, then fixes the list and end date. Meanwhile: trace and
-fix D150 on `perf/phase11-integration`; finish the D145 merge in `p11` (`git commit`, gates); add a
+reviews the profile note and the BDN note, then fixes the list and end date. Meanwhile: finish the D145 merge in `p11` (`git commit`, gates); add a
 fuzzy partial row to the suite; nothing merges to main before v1.2.0 is tagged.

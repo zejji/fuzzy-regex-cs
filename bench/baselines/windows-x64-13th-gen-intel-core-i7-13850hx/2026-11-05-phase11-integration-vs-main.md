@@ -5,8 +5,7 @@ up to 35% faster on the rows they target, with no row slower beyond its noise.**
 benchmarks the geometric mean of the integration/main time ratio is 0.961 and the median 0.984.
 The slowest row, `CountMemoryMegabyte` at 1.034, is inside its own run-to-run spread (its
 integration A-A reads 1.154). The BCL control rows, which do not run FuzzyRegex, read
-0.989-1.014, so neither side was disturbed. One row allocates more: `ConditionalPerTokenNoMemo`,
-0 to 504 B per call (D150, below).
+0.989-1.014, so neither side was disturbed. No row allocates more.
 
 ## What was measured, and how
 
@@ -64,12 +63,13 @@ about 7 ns a call, a fixed per-call saving that fits D138's smaller state.
 - `MatchesFirstTwo` 3,032 to 2,432 B per call (D138); below 1.1.0's 2,792 B.
 - Uncached and static-cache compiles 760-840 B less (`UncachedMatch` 36,256 to 35,496 B), and the
   fuzzy compile 944 B less (`UncachedFuzzyIsMatch` 16,032 to 15,088 B): D139 and D141.
-- **`ConditionalPerTokenNoMemo` 0 to 504 B per call: an allocation regression (D150).** Not yet
-  traced. Every other row allocates the same, within a few bytes.
+- `ConditionalPerTokenNoMemo` reads 0 to 504 B per call, but that is one launch of the four on the
+  integration build (2,016 B over 4 ops); the repeat pass on the same build reads 0, and a harness
+  outside BenchmarkDotNet measures 0 B per call on every tree (D150, closed as noise). Every other
+  row allocates the same, within a few bytes.
 
 ## What this means
 
 The compile-time items (D139, D140, D141) and the per-call items (D138, D143, D144) each show in
-the suite where the profile said they would, and nothing outside them moved. D150 has to be traced
-and fixed before the integration branch merges. D145's gain (a 1 MB fuzzy partial search from
+the suite where the profile said they would, and nothing outside them moved. D145's gain (a 1 MB fuzzy partial search from
 about 160 ms to 0.13 ms) needs a suite row of its own.
