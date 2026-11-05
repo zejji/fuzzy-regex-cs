@@ -12,7 +12,7 @@ and the release entry is written in phase 8. A **Divergences from mrab-regex** s
 module needs to know where this port deliberately behaves differently. From 1.0 on, entries are
 per release.
 
-## [1.2.0] - Unreleased
+## [1.2.0] - 2026-11-05
 
 A correctness release. It fixes every defect registered when its scope was frozen on 2026-11-01
 that can give a wrong answer, most of them in partial matching and in fuzzy sections nested
