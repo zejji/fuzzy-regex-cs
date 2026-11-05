@@ -95,7 +95,7 @@ unlisted until that finishes, and you get an email when it is done.
   publishes as Native AOT (Step 2 of `docs/plan/RELEASE.md`, with nuget.org as the only source).
 - Open the next `[Unreleased]` section in `CHANGELOG.md`.
 - Set `PackageValidationBaselineVersion` in `src/FuzzyRegex/FuzzyRegex.csproj` to the version you
-  just published, so every later pack checks the public API against it. It is `1.1.0` now.
+  just published, so every later pack checks the public API against it. It is `1.2.0` now.
 - Bump `VersionPrefix` when work on the next version starts.
 
 ## Sources (read 2026-10-20)

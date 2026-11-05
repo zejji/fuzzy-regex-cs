@@ -12,6 +12,8 @@ and the release entry is written in phase 8. A **Divergences from mrab-regex** s
 module needs to know where this port deliberately behaves differently. From 1.0 on, entries are
 per release.
 
+## [Unreleased]
+
 ## [1.2.0] - 2026-11-05
 
 A correctness release. It fixes every defect registered when its scope was frozen on 2026-11-01
@@ -343,6 +345,7 @@ a caller arriving from Python meets first:
 Most of the remaining rows are upstream defects fixed here and pinned by tests; each has an entry
 in `docs/plan/upstream-reports/LEDGER.md`.
 
-[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/zejji/fuzzy-regex-cs/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/zejji/fuzzy-regex-cs/releases/tag/v1.0.0
