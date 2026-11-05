@@ -48,7 +48,7 @@ pushes need the owner.
   compile 5.8 to 1.8 us, 309,104 compiles identical; gates green bar D142). D138 DONE on
   `perf/d138-lazy-state` 123f57a5 (`Matches(s)[1]` -600 B, now under 1.1.0; prolog unchanged; gates
   green bar D142; timing indicative, re-time with LHM). Note: AllocationTests lookaround row
-  `(?=\w*\d)(?!\d+)\w+` fails when run alone (27,680 > 27,664 B), on main too; passes in the suite.
+  `\b(?=\w*\d)(?!\d+\b)\w+` fails when run alone (27,680 > 27,664 B), on main too; passes in the suite.
   Builders (Opus, background): D144 filter ASCII pass, worktree `d144`, branch `perf/d144-filter-ascii`; D143 `ThisErrorPermitted` fast path, worktree `d143`, branch
   `perf/d143-error-permitted` (profile note, fuzzy targets). D141 DONE on `perf/ascii-fill` 31643d2a (compile -19% to -45%, matching
   flat; gates green bar D142). A stopped builder leaves WIP on its branch.
