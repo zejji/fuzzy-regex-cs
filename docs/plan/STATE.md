@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-05 23:00 by Claude Code (D141 storage measured: A2 kept; oracle and p11 merge in progress).
+**Updated:** 2026-11-05 23:05 by Claude Code (D141 merged into p11; whole-suite BDN running overnight).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -12,12 +12,12 @@ measurement, WPR profiles and benchmarks.
 | # | Item | Branch | State | Left to do |
 |---|---|---|---|---|
 | 1 | D139 + D140 compile without exceptions | `perf/d140-flags` be41758f | green | merge via #7 |
-| 2 | D141 ASCII answers | `perf/ascii-fill` 9e31db88 | ratchet GREEN, blind review clean, timed (`2026-11-05-d141-storage-timing.md`) | oracle 3 seeds (running); merge into p11 |
+| 2 | D141 ASCII answers | `perf/ascii-fill` 9e31db88 | done: merged into p11 e9c4161a | - |
 | 3 | D138 lazy `MatchState` fields | `perf/d138-lazy-state` 123f57a5 | green | merge via #7 |
 | 4 | D143 plain error budget | `perf/d143-error-permitted` bd5a1eb4 | green | merge via #7 |
 | 5 | D144 filter on non-ASCII text | `perf/d144-filter-ascii` 717b174f | green, blind review clean | merge via #7 |
 | 6 | D145 fuzzy partial prefilter | `perf/d145-partial-filter` eb555b33 | green, proof + review clean | merge via #7; add a BDN fuzzy partial row |
-| 7 | Integration to main (owner approved) | `perf/phase11-integration` a515bb6f, worktree `p11` | D145 merged (ratchet GREEN) | take #2; ratchet, oracle 3 seeds, allocation, BDN vs main; merge, push (owner) |
+| 7 | Integration to main (owner approved) | `perf/phase11-integration` e9c4161a, worktree `p11` | D145 + D141 merged, ratchet GREEN (10,246) | BDN vs main (running); oracle 3 seeds on e9c4161a; merge, push (owner) |
 | 8 | Grouped fuzzy repeats `(?:(\w+) jumps over){e<=2}` | - | not started | WPR profile first |
 | 9 | D29 + D135 compile allocation | - | not started | |
 | 10 | `(?b)` 544 B per call | - | not started | |
@@ -41,9 +41,11 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - Overnight to 07:40 (owner 2026-11-05): machine free for timing. AC sleep disabled.
-- Oracle on `ascii`: log `.scratch/d141r/oracle-a2.log`. `p11`: D141 merge staged (conflicts resolved), ratchet log `.scratch/d141r/p11-ratchet2.log`.
+- BDN night 2 (PID 600, from 22:58, ETA ~03:15): `.scratch/s1024/bdn-p11b.ps1`, log `bdn-p11b.log`, results `bdn-p11b/`;
+  worktrees `bdn-p11main` (main) and `bdn-p11int` (e9c4161a). CPU capped 4000 MHz: restore PROCFREQMAX AC to 0 by 07:40.
+- D141 oracle (`ascii`): seeds 7 and 4242 clean; 20261105 only D146-D149, byte-identical on main.
 - Deferred defects: D134, D135, D136, D137, D142, D146-D149. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-**Next action:** oracle verdict on `ascii`; commit the D141 merge in p11; item 7 gates (oracle, allocation,
-whole-suite BDN vs main); then item 8 (WPR profile, harness `.scratch/p11-item8/grouped.cs`).
+**Next action:** during BDN, item 13 (design note, no CPU). After BDN: compare, oracle on p11, item 8 (WPR,
+harness `.scratch/p11-item8/grouped.cs`).
