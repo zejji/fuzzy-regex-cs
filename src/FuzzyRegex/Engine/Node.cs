@@ -205,10 +205,10 @@ internal sealed class Node
     /// <c>ch &amp; 63</c> of element <c>ch &gt;&gt; 6</c>, or <see langword="null"/> for a node it is not
     /// kept for (<see cref="Matcher.HasAsciiAnswers"/>) or for a set member, which its set answers for
     /// (D141). Set by <see cref="Matcher.FillAsciiAnswers"/> as the last step of
-    /// <see cref="PatternObject.Compile"/>, from the node's own predicate, so the two cannot disagree;
-    /// a node that is not a set may share its array with every node of the same predicate and
-    /// arguments, so nothing writes it after. The idea is .NET's <c>RegexCharClass</c> ASCII lookup,
-    /// computed eagerly here because a compiled pattern is never written while it matches.
+    /// <see cref="PatternObject.Compile"/>, by <see cref="AsciiAnswers"/> or the node's own predicate,
+    /// which tests prove agree; nothing writes it after. The idea is .NET's <c>RegexCharClass</c>
+    /// ASCII lookup, computed eagerly here because a compiled pattern is never written while it
+    /// matches.
     /// </summary>
     internal ulong[]? AsciiAnswers { get; set; }
 

@@ -623,14 +623,6 @@ public sealed class ThreadSafetyTests
                 continue;
             }
 
-            // D141: the ASCII table cache grows whenever anything compiles, as the pattern cache
-            // does, so it is left out explicitly for the same reason. The workload between the
-            // readings matches already-compiled patterns, which never reaches it.
-            if (field.FieldType == typeof(Fuzzy.Text.RegularExpressions.Engine.AsciiAnswerCache))
-            {
-                continue;
-            }
-
             snapshot[name] = value switch
             {
                 null => "null",
@@ -725,16 +717,6 @@ public sealed class ThreadSafetyTests
         // asserted, exactly as the Dictionary entry above is: PatternCacheStressTests runs four
         // threads per core through one bounded cache and checks every answer and the bound.
         if (type == typeof(PatternCache))
-        {
-            return true;
-        }
-
-        // D141's table cache, the second and last such class: a ConcurrentDictionary behind one
-        // file (src/FuzzyRegex/Engine/AsciiAnswerCache.cs), written only by compiling, never by
-        // matching, and each table it hands out is filled before it is published and never
-        // written after. AsciiAnswersTests measures the tables under threads, against the
-        // predicate.
-        if (type == typeof(Fuzzy.Text.RegularExpressions.Engine.AsciiAnswerCache))
         {
             return true;
         }
@@ -1045,8 +1027,7 @@ public sealed class ThreadSafetyTests
             "Node.EnclosingSection",
             // D124: written by Compile once the lookaround bodies are set (SetVacuousDecisionLookarounds).
             "Node.HasVacuousDecision",
-            // D141: written by Matcher.FillAsciiAnswers, the last pass of Compile. A test that is
-            // not a set shares its array through AsciiAnswerCache, filled before it is published.
+            // D141: written by Matcher.FillAsciiAnswers, the last pass of Compile.
             "Node.<AsciiAnswers>k__BackingField",
             "Node.Match",
             "Node.Op",
