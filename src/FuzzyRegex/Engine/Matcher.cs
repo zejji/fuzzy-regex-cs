@@ -9558,6 +9558,42 @@ internal static class Matcher
             + (fuzzyCounts[FuzzyValue.Sub] * values[FuzzyValue.SubCost]);
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D143): whether a <c>FUZZY</c> node's budget lets <see cref="ThisErrorPermitted"/>
+    /// and <see cref="AnyErrorPermitted"/> compare the error count alone.
+    /// </summary>
+    /// <remarks>
+    /// Plain means every error costs 1, so the cost of the counts is their total, and no per-type
+    /// maximum is below the smaller of the error and cost maxima. A type's count is at most the total,
+    /// and an error fits only while the total is below that smaller maximum, so the type's own maximum
+    /// never refuses an error the other limits allow. <c>{e&lt;=2}</c> is plain: the parser leaves each
+    /// type's maximum unlimited and sets the cost maximum to the error maximum
+    /// (<c>upstream/regex/_regex_core.py:2802-2819</c>). The values never change after
+    /// <c>NodeCompiler.BuildFuzzy</c>, the one place that writes them, sets them.
+    /// </remarks>
+    /// <param name="values">The node's values.</param>
+    /// <returns><see langword="true"/> if the budget is plain.</returns>
+    internal static bool HasPlainErrorBudget(uint[] values)
+    {
+        uint limit = Math.Min(values[FuzzyValue.MaxErr], values[FuzzyValue.MaxCost]);
+
+        return values[FuzzyValue.SubCost] == 1
+            && values[FuzzyValue.InsCost] == 1
+            && values[FuzzyValue.DelCost] == 1
+            && values[FuzzyValue.MaxSub] >= limit
+            && values[FuzzyValue.MaxIns] >= limit
+            && values[FuzzyValue.MaxDel] >= limit;
+    }
+
+    /// <summary>
+    /// D143's assumption that the plain checks leave out the run's cost budget,
+    /// <see cref="MatchState.MaxCost"/>: it is finite only in <c>DoBestFuzzyMatch</c>'s walks, and
+    /// only when <c>rankByCost</c> holds, which needs the pattern's one fuzzy section to have unequal
+    /// costs (<see cref="PatternObject.HasWeightedFuzzyCosts"/>), so never under a plain budget.
+    /// </summary>
+    private const string _plainBudgetUnboundedCost =
+        "D143: the run's cost budget is finite only for a single weighted section, never a plain one.";
+
     /// <summary>Upstream <c>any_error_permitted</c> (line 9660).</summary>
     /// <remarks>
     /// The last conjunct is <see cref="MatchState.MaxCost"/>, which upstream carried here itself
@@ -9575,6 +9611,40 @@ internal static class Matcher
         // and a copy runs only from a call inside a section. D40 was a copy that broke this.
         Debug.Assert(state.FuzzyNode is not null, "A fuzzy item ran with no fuzzy section in force.");
         Node fuzzyNode = state.FuzzyNode;
+        uint[] values = fuzzyNode.Values;
+
+        // NOT UPSTREAM (D143). sync-divergence: upstream's any_error_permitted (_regex.c:9660)
+        // always computes the cost / a plain budget (HasPlainErrorBudget) prices every error at 1,
+        // so the cost is the error count and is not computed / the check runs per exactly matched
+        // character under a fuzzy section (WPR, fuzzy phrase, 2026-11-04). Re-aligning: if upstream
+        // changes what this function reads, change AnyErrorPermittedFully and re-derive
+        // HasPlainErrorBudget; the Debug assertion compares the two on every call.
+        if (fuzzyNode.HasPlainErrorBudget)
+        {
+            Debug.Assert(state.MaxCost == long.MaxValue, _plainBudgetUnboundedCost);
+            long errorCount = TotalErrors(fuzzyCounts);
+            bool permitted = errorCount <= values[FuzzyValue.MaxCost] && errorCount < state.MaxErrors;
+            Debug.Assert(
+                permitted == AnyErrorPermittedFully(state),
+                "D143: the plain check differs from the full one."
+            );
+
+            return permitted;
+        }
+
+        return AnyErrorPermittedFully(state);
+    }
+
+    /// <summary>
+    /// <see cref="AnyErrorPermitted"/> for every budget: upstream's <c>any_error_permitted</c> with
+    /// the conjunct that method's remarks describe.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if one more error of some kind could still fit.</returns>
+    private static bool AnyErrorPermittedFully(MatchState state)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+        Node fuzzyNode = state.FuzzyNode!;
         uint[] values = fuzzyNode.Values;
         long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
@@ -9599,6 +9669,49 @@ internal static class Matcher
     /// <param name="fuzzyType">The error being tried.</param>
     /// <returns><see langword="true"/> if one more error of exactly that kind fits.</returns>
     private static bool ThisErrorPermitted(MatchState state, int fuzzyType)
+    {
+        Node fuzzyNode = state.FuzzyNode!;
+
+        // NOT UPSTREAM (D143). sync-divergence: upstream's this_error_permitted (_regex.c:9676)
+        // always computes the cost and checks the type's own maximum / under a plain budget
+        // (HasPlainErrorBudget) the cost is the error count and no type's maximum can refuse an
+        // error before the smaller of the error and cost maxima does, so the count alone is compared
+        // / it runs per exactly matched character under a fuzzy section (the exact-deletion frames)
+        // and was 12-18% of a fuzzy phrase match (WPR, 2026-11-04). Re-aligning: if upstream changes
+        // what this function reads, change ThisErrorPermittedFully and re-derive
+        // HasPlainErrorBudget; the Debug assertion compares the two on every call.
+        if (fuzzyNode.HasPlainErrorBudget)
+        {
+            Debug.Assert(state.MaxCost == long.MaxValue, _plainBudgetUnboundedCost);
+            uint[] plainValues = fuzzyNode.Values;
+            long plainCount = TotalErrors(state.FuzzyCounts);
+            bool permitted =
+                plainCount < plainValues[FuzzyValue.MaxCost]
+                && plainCount < plainValues[FuzzyValue.MaxErr]
+                && plainCount < state.MaxErrors
+                && (
+                    !state.Pattern.NestsFuzzySections
+                    || OneMoreErrorFitsTheOpenSections(state, fuzzyType, sectionAsked: true)
+                );
+            Debug.Assert(
+                permitted == ThisErrorPermittedFully(state, fuzzyType),
+                "D143: the plain check differs from the full one."
+            );
+
+            return permitted;
+        }
+
+        return ThisErrorPermittedFully(state, fuzzyType);
+    }
+
+    /// <summary>
+    /// <see cref="ThisErrorPermitted"/> for every budget: upstream's <c>this_error_permitted</c> with
+    /// the two conjuncts that method's remarks describe.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="fuzzyType">The error being tried.</param>
+    /// <returns><see langword="true"/> if one more error of exactly that kind fits.</returns>
+    private static bool ThisErrorPermittedFully(MatchState state, int fuzzyType)
     {
         long[] fuzzyCounts = state.FuzzyCounts;
         Node fuzzyNode = state.FuzzyNode!;

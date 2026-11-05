@@ -145,6 +145,22 @@ internal sealed class Node
         set => SetFlag(_savesOnlyForCallsFlag, value);
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D143: for a <c>FUZZY</c> node, whether its budget is plain enough for
+    /// <c>Matcher.ThisErrorPermitted</c> and <c>Matcher.AnyErrorPermitted</c> to compare the error
+    /// count alone. Set once by <c>NodeCompiler.BuildFuzzy</c> from
+    /// <c>Matcher.HasPlainErrorBudget</c>. A bit here costs no memory; a <see langword="bool"/> field
+    /// added 8 bytes to every node.
+    /// </summary>
+    internal bool HasPlainErrorBudget
+    {
+        get => (_flags & _plainErrorBudgetFlag) != 0;
+        set => SetFlag(_plainErrorBudgetFlag, value);
+    }
+
+    /// <summary>Bit of <see cref="_flags"/> for <see cref="HasPlainErrorBudget"/>.</summary>
+    private const int _plainErrorBudgetFlag = 8;
+
     /// <summary>Bit of <see cref="_flags"/> for <see cref="MemoisesNegativeOutcome"/>.</summary>
     private const int _memoisesNegativeOutcomeFlag = 1;
 

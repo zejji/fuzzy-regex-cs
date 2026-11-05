@@ -583,6 +583,9 @@ internal static class NodeCompiler
         startNode.Values[FuzzyValue.SubCost] = args.At(12);
         startNode.Values[FuzzyValue.MaxCost] = args.At(13);
 
+        // NOT UPSTREAM (D143): see Matcher.HasPlainErrorBudget.
+        startNode.HasPlainErrorBudget = Matcher.HasPlainErrorBudget(startNode.Values);
+
         // THIS PORT'S OWN LINE, for 'Matcher.DoBestFuzzyMatch'. Upstream has no equivalent because
         // nothing upstream ranks by cost. A section whose three costs are equal prices every error
         // the same, so its cost is a fixed multiple of its error count and the two rankings order
