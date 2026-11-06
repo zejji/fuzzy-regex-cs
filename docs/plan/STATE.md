@@ -12,7 +12,7 @@ measurement, WPR profiles and benchmarks.
 | # | Item | Branch | State | Left to do |
 |---|---|---|---|---|
 | 1-7 | D138-D145, D141 rework, D135 (integration) | `perf/phase11-integration` 2c45e127 | merged to main 2026-11-06 (owner), pushed | - |
-| 8 | Grouped fuzzy repeats (D154) | `perf/item8-required-literal`, worktree `req` | screen built, ratchet GREEN; near miss 310,886 to 204 ns; hit-row cost not settled (noisy rounds) | quiet A-B-B-A of the hit rows; oracle 3 seeds; blind review; merge into p11 |
+| 8 | Grouped fuzzy repeats (D154) | `perf/item8-required-literal` ee646911, worktree `req` | screen committed, ratchet GREEN; near miss 310,886 to 204 ns; hit-row cost not settled (noisy rounds) | quiet A-B-B-A of the hit rows; oracle 3 seeds; blind review; merge into p11 |
 | 9 | D29 + D135 compile allocation | D135 `perf/d135-open-group-counts` 4b0bd431 | D135 merged into p11 2c45e127 (ratchet GREEN, oracle: known rows only) | D29 |
 | 10 | `(?b)` 544 B per call | - | not started | |
 | 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
