@@ -35,7 +35,7 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
-- Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
+- Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 **Next action:** transpositions section 10 rewrite (subagent) from `.scratch/research/EVIDENCE.md` and
