@@ -2773,13 +2773,15 @@ internal sealed class PatternObject
             && pattern.CutBodies is { ContinuationKeyRepeats: int[] keyedRepeats } keyedFacts
         )
         {
-            Dictionary<object, int[]> enclosing = TailGuardLiveness.EnclosingGroups(pattern);
+            // D135: the counts only; the full map (TailGuardLiveness.EnclosingGroups) cost 7-12%
+            // of such a pattern's compile allocation.
+            int[] openCounts = TailGuardLiveness.OpenGroupCounts(pattern);
             keyedFacts.ContinuationOpenGroups = new int[keyedRepeats.Length];
             for (int i = 0; i < keyedRepeats.Length; i++)
             {
                 if (keyedRepeats[i] >= 0)
                 {
-                    int open = enclosing.TryGetValue(pattern.NodeList[i], out int[]? groups) ? groups.Length : 0;
+                    int open = openCounts[i];
                     keyedFacts.ContinuationOpenGroups[i] = open;
                     keyedFacts.MaxContinuationOpenGroups = Math.Max(keyedFacts.MaxContinuationOpenGroups, open);
                 }

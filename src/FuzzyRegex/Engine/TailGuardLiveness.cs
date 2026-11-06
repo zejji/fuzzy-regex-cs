@@ -404,6 +404,81 @@ internal static class TailGuardLiveness
         return result;
     }
 
+    /// <summary>
+    /// D135: how many capture groups are open around each node, by the same walk as
+    /// <see cref="EnclosingGroups"/> and so the same first-visit answer, without building a
+    /// dictionary and an array per node. A partial call reads only these counts
+    /// (<see cref="CutBodyFacts.ContinuationOpenGroups"/>), and every compile of a pattern with a
+    /// keyed lookaround and a capture group paid for the full map (7-12% of its compile allocation).
+    /// </summary>
+    /// <param name="pattern">The pattern, its nodes numbered.</param>
+    /// <returns>Each node's count by <see cref="Node.Index"/>; 0 for a node the walk never reaches.</returns>
+    internal static int[] OpenGroupCounts(PatternObject pattern)
+    {
+        // -1 marks a node not reached yet, so one array serves as the visited set too.
+        int[] counts = new int[pattern.NodeList.Count];
+        Array.Fill(counts, -1);
+        var todo = new Stack<(Node Node, OpenGroup? Open)>();
+        todo.Push((pattern.StartNode!, null));
+        while (todo.Count > 0)
+        {
+            (Node node, OpenGroup? open) = todo.Pop();
+            System.Diagnostics.Debug.Assert(
+                ReferenceEquals(pattern.NodeList[node.Index], node),
+                "every node the walk reaches is in the node list, at its index"
+            );
+            if (counts[node.Index] >= 0)
+            {
+                continue;
+            }
+
+            counts[node.Index] = open?.Depth ?? 0;
+
+            OpenGroup? after = open;
+            if (node.Op is Opcode.StartGroup or Opcode.EndGroup)
+            {
+                int group = (int)node.Values[0];
+                if (node.Values[2] == 0)
+                {
+                    after = new OpenGroup(group, open, (open?.Depth ?? 0) + 1);
+                }
+                else if (open is not null && open.Group == group)
+                {
+                    after = open.Outer;
+                }
+            }
+
+            // Successors, pushed in the order EnclosingGroups pushes them.
+            if (node.Next1.Node is Node next1)
+            {
+                todo.Push((next1, after));
+            }
+
+            if ((node.Status & NodeStatus.String) == 0 && node.Next2.Node is Node next2)
+            {
+                todo.Push((next2, after));
+            }
+
+            if (node.TrueNode is Node trueNode)
+            {
+                todo.Push((trueNode, after));
+            }
+        }
+
+        for (int i = 0; i < counts.Length; i++)
+        {
+            counts[i] = Math.Max(counts[i], 0);
+        }
+
+        return counts;
+    }
+
+    /// <summary>One open group in <see cref="OpenGroupCounts"/>'s walk, sharing its outer groups.</summary>
+    /// <param name="Group">The group, one-based.</param>
+    /// <param name="Outer">The group open around it, if any.</param>
+    /// <param name="Depth">How many groups are open, this one included.</param>
+    private sealed record OpenGroup(int Group, OpenGroup? Outer, int Depth);
+
     /// <summary>What reading a group means when nothing narrower is known.</summary>
     /// <param name="pattern">The pattern.</param>
     /// <param name="group">The group, one-based.</param>

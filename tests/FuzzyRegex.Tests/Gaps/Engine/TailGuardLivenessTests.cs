@@ -74,6 +74,32 @@ public sealed class TailGuardLivenessTests
         string.Join(" ", parts).Should().Be(expected);
     }
 
+    [Test]
+    // D135: the count-only walk must give, at every node, the number of groups the full map gives.
+    // Nested and sibling groups, alternation, repeats around groups, lookarounds, conditions,
+    // group calls, reversed patterns and a group closed on one path only.
+    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+")]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)")]
+    [Arguments(@"(a)(b)(?=c(d))(e)")]
+    [Arguments(@"((a)|(b(c)))*(?=(d))\3")]
+    [Arguments(@"(?r)(x(y))(?<=z(w)*)\2")]
+    [Arguments(@"(a(?:b|(c))*)(?(2)d|e)(?1)")]
+    [Arguments(@"(?:(a)|b)+(?=(\1)*c)")]
+    [Arguments(@"(b?)(?:a*|b)*(?2)c(?(DEFINE)(\1(?:x(?2))?))")]
+    public void Open_group_counts_equal_the_enclosing_groups_map(string pattern)
+    {
+        PatternObject compiled = new FuzzyRegex(pattern).PatternObject;
+        Dictionary<object, int[]> enclosing = TailGuardLiveness.EnclosingGroups(compiled);
+        int[] counts = TailGuardLiveness.OpenGroupCounts(compiled);
+
+        int[] expected =
+        [
+            .. compiled.NodeList.Select(node => enclosing.TryGetValue(node, out int[]? open) ? open.Length : 0),
+        ];
+        counts.Should().Equal(expected);
+        expected.Should().Contain(static n => n > 0, "the row must have a node inside a group");
+    }
+
     private static string Describe(PatternObject pattern)
     {
         var parts = new List<string>();
