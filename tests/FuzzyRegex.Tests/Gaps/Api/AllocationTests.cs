@@ -309,6 +309,35 @@ public sealed class AllocationTests
             );
     }
 
+    /// <summary>
+    /// D135: a pattern with a keyed lookaround and a capture group needs, for a partial call, only
+    /// how many groups are open at each keyed repeat; building the map of every node's open groups
+    /// to answer that cost 7-12% of its compile allocation. The ceilings are the count-only walk's
+    /// (Debug, JIT, 2026-11-06); the integration branch before it, e9c4161a, allocated 33,768 and
+    /// 112,920 B. Native AOT was not measured, so the test runs under the JIT only.
+    /// </summary>
+    /// <param name="pattern">The pattern: a keyed lookaround and a capture group.</param>
+    /// <param name="jitCeiling">The fix's bytes for one compile under the JIT, Debug.</param>
+    [Test]
+    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_288)]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_544)]
+    public void Compiling_a_pattern_with_a_keyed_lookaround_and_a_group_counts_open_groups_only(
+        string pattern,
+        long jitCeiling
+    )
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceilings are the JIT's; Native AOT's were not measured");
+        }
+
+        _ = new FuzzyRegex(pattern);
+
+        long allocated = AllocatedBy(() => () => _ = new FuzzyRegex(pattern));
+
+        allocated.Should().BeLessThanOrEqualTo(jitCeiling, "a partial call reads only the open-group counts");
+    }
+
     [Test]
     public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
     {
