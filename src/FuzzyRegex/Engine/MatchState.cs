@@ -1700,7 +1700,7 @@ internal sealed class MatchState : IDisposable
         EmptyIterationScratch =
             pattern.TestedGroups.Length > 0 ? new long[2 + FuzzyValue.Count + (2 * pattern.TestedGroups.Length)] : null;
         OptionalPasses = pattern.OptionalPassCount == 0 ? [] : new OptionalPassStart[pattern.OptionalPassCount];
-        FilterMemory = pattern.FuzzyLiteralFilter?.NewScanMemory();
+        FilterMemory = (pattern.FuzzyLiteralFilter ?? pattern.RequiredLiteralFilter)?.NewScanMemory();
     }
 
     /// <summary>

@@ -15543,6 +15543,13 @@ internal static class Matcher
                 ? pattern.FuzzyLiteralFilter
                 : null;
 
+        // Phase 11 item 8: the required-literal screen, for complete searches only (a partial match
+        // can stop before the literal), and forward only (TryCreateRequired builds no other).
+        if (fuzzyFilter is null && search && !state.OneAttempt && state.PartialSide == MatchState.PartialNone)
+        {
+            fuzzyFilter = pattern.RequiredLiteralFilter;
+        }
+
         Node node;
 
         // Split step 1: the D82 helpers and the fuzzy calls take their hot locals by 'ref'. Passing

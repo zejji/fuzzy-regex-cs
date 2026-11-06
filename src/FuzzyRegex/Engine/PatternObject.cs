@@ -803,6 +803,14 @@ internal sealed class PatternObject
     internal FuzzyLiteralFilter? FuzzyLiteralFilter;
 
     /// <summary>
+    /// NOT UPSTREAM'S (phase 11 item 8): the required-literal screen, for a pattern that is one
+    /// fuzzy section ending in a literal but holding more than literals
+    /// (<see cref="Engine.FuzzyLiteralFilter.TryCreateRequired"/>); <see langword="null"/> whenever
+    /// <see cref="FuzzyLiteralFilter"/> is set. Complete forward searches only.
+    /// </summary>
+    internal FuzzyLiteralFilter? RequiredLiteralFilter;
+
+    /// <summary>
     /// The single-character repeat a search attempt starts with, or <see langword="null"/>: the
     /// one whose run <c>Matcher.BasicMatch</c>'s <c>FAILURE</c> arm skips before the next attempt.
     /// <b>Wider than upstream's</b> (S60b item 17); see <see cref="FindLeadingRepeat"/>.
@@ -1668,6 +1676,9 @@ internal sealed class PatternObject
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
+        self.RequiredLiteralFilter = self.FuzzyLiteralFilter is null
+            ? FuzzyLiteralFilter.TryCreateRequired(self)
+            : null;
 
         self.LeadingRepeat = FindLeadingRepeat(self);
 

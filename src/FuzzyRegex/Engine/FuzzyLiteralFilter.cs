@@ -371,6 +371,231 @@ internal sealed class FuzzyLiteralFilter
     }
 
     /// <summary>
+    /// Phase 11 item 8: whether this filter screens only for a literal every match must hold
+    /// (<see cref="TryCreateRequired"/>), rather than for the whole pattern. Such a filter only
+    /// refuses: it never moves a start, because the text before the literal can be any length.
+    /// </summary>
+    internal bool Required { get; private init; }
+
+    /// <summary>
+    /// Phase 11 item 8: a screen for a pattern that is one fuzzy section ending in a literal, such
+    /// as <c>(?:(\w+) jumps over){e&lt;=2}</c>, which <see cref="TryCreate"/> refuses because the
+    /// section holds more than literals.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it is sound.</b> The literal ends the section and every path through the section
+    /// passes through it, so every match aligns a stretch of its own text with the literal, and
+    /// every edit there is one of the section's errors: the stretch is within <c>k</c> edits of the
+    /// literal. A slice holding no such stretch holds no match. The scan
+    /// (<see cref="LiteralScan"/>) decides that exactly; the pieces are not used, because a
+    /// stretch can hold an untouched piece and still be more than <c>k</c> edits away.
+    /// </para>
+    /// <para>
+    /// <b>The shape is kept narrow, so the argument above is the whole argument:</b> the pattern
+    /// starts with the section and the section's end leads to <c>SUCCESS</c>; nothing inside
+    /// can run a test, a call, a backreference or another fuzzy section, or skip by a verb; the
+    /// literal is forward. Partial searches do not use it (a partial match can stop before the
+    /// literal); <c>Matcher.BasicMatch</c> consults it for complete forward searches only.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern, after optimisation.</param>
+    /// <returns>The screen, or <see langword="null"/>.</returns>
+    internal static FuzzyLiteralFilter? TryCreateRequired(PatternObject pattern)
+    {
+        if (
+            pattern.StartNode is not { Op: Opcode.Fuzzy } fuzzy
+            || fuzzy.Next2.Node is not null
+            || fuzzy.Next1.Node is not { } first
+        )
+        {
+            return null;
+        }
+
+        // The section's nodes, up to its END_FUZZY, which must be the only one and lead to SUCCESS.
+        var section = new List<Node>();
+        bool[] seen = new bool[pattern.NodeList.Count];
+        var todo = new Stack<Node>();
+        todo.Push(first);
+        Node? end = null;
+        while (todo.Count > 0)
+        {
+            Node node = todo.Pop();
+            if (seen[node.Index])
+            {
+                continue;
+            }
+
+            seen[node.Index] = true;
+            if (node.Op == Opcode.EndFuzzy)
+            {
+                if (end is not null && !ReferenceEquals(end, node))
+                {
+                    return null;
+                }
+
+                end = node;
+                continue;
+            }
+
+            if (!RequiredShapeAllows(node.Op))
+            {
+                return null;
+            }
+
+            section.Add(node);
+            foreach (Node next in SectionSuccessors(node))
+            {
+                todo.Push(next);
+            }
+        }
+
+        if (end is not { Next1.Node.Op: Opcode.Success })
+        {
+            return null;
+        }
+
+        long maxErrors = MostErrors(fuzzy.Values);
+        if (maxErrors < 0)
+        {
+            return null;
+        }
+
+        // The longest literal run that ends the section and that every path passes through.
+        LiteralScan? best = null;
+        bool bestIgnoreCase = false;
+        foreach (Node candidate in section)
+        {
+            if (candidate.Op is not (Opcode.String or Opcode.StringIgn or Opcode.StringFld))
+            {
+                continue;
+            }
+
+            var walk = new LiteralWalk();
+            if (
+                !walk.Collect(candidate, new LiteralPath())
+                || walk.Reverse is not false
+                || walk.Literals.Count != 1
+                || !Dominates(first, candidate, end, pattern.NodeList.Count)
+            )
+            {
+                continue;
+            }
+
+            if (LiteralScan.ForLiteral(walk, maxErrors) is { } scan && (best is null || scan.Length > best.Length))
+            {
+                best = scan;
+                bestIgnoreCase = walk.IgnoreCase;
+            }
+        }
+
+        return best is null
+            ? null
+            : new FuzzyLiteralFilter([], [], (int)maxErrors, bestIgnoreCase, reverse: false, best)
+            {
+                Required = true,
+                PartialReach = int.MaxValue,
+            };
+    }
+
+    /// <summary>
+    /// The opcodes a section may hold for <see cref="TryCreateRequired"/>: anything that reads text
+    /// forward or structures the path, but no lookaround, condition, call, backreference, nested
+    /// fuzzy section, verb or reversed item.
+    /// </summary>
+    /// <param name="op">The opcode.</param>
+    /// <returns>Whether it is allowed.</returns>
+    private static bool RequiredShapeAllows(Opcode op) =>
+        op
+            is Opcode.Any
+                or Opcode.AnyAll
+                or Opcode.AnyU
+                or Opcode.Branch
+                or Opcode.Character
+                or Opcode.CharacterIgn
+                or Opcode.EndGreedyRepeat
+                or Opcode.EndGroup
+                or Opcode.EndLazyRepeat
+                or Opcode.EndOptionalPass
+                or Opcode.GreedyRepeat
+                or Opcode.GreedyRepeatOne
+                or Opcode.LazyRepeat
+                or Opcode.LazyRepeatOne
+                or Opcode.Property
+                or Opcode.PropertyIgn
+                or Opcode.Range
+                or Opcode.RangeIgn
+                or Opcode.SetDiff
+                or Opcode.SetDiffIgn
+                or Opcode.SetInter
+                or Opcode.SetInterIgn
+                or Opcode.SetSymDiff
+                or Opcode.SetSymDiffIgn
+                or Opcode.SetUnion
+                or Opcode.SetUnionIgn
+                or Opcode.StartGroup
+                or Opcode.String
+                or Opcode.StringFld
+                or Opcode.StringIgn;
+
+    /// <summary>The nodes the matcher can go to next inside a section, as the liveness pass walks them.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>Up to three successors.</returns>
+    private static IEnumerable<Node> SectionSuccessors(Node node)
+    {
+        if (node.Next1.Node is Node next1)
+        {
+            yield return next1;
+        }
+
+        if ((node.Status & NodeStatus.String) == 0 && node.Next2.Node is Node next2)
+        {
+            yield return next2;
+        }
+
+        if (node.TrueNode is Node trueNode)
+        {
+            yield return trueNode;
+        }
+    }
+
+    /// <summary>Whether every path from <paramref name="first"/> to <paramref name="end"/> passes through <paramref name="through"/>.</summary>
+    /// <param name="first">The section's first node.</param>
+    /// <param name="through">The node.</param>
+    /// <param name="end">The section's END_FUZZY.</param>
+    /// <param name="nodeCount">The pattern's node count, which bounds every <see cref="Node.Index"/>.</param>
+    /// <returns><see langword="true"/> if <paramref name="end"/> cannot be reached without it.</returns>
+    private static bool Dominates(Node first, Node through, Node end, int nodeCount)
+    {
+        bool[] seen = new bool[nodeCount];
+        seen[through.Index] = true;
+        var todo = new Stack<Node>();
+        todo.Push(first);
+        while (todo.Count > 0)
+        {
+            Node node = todo.Pop();
+            if (ReferenceEquals(node, end))
+            {
+                return false;
+            }
+
+            if (seen[node.Index])
+            {
+                continue;
+            }
+
+            seen[node.Index] = true;
+
+            foreach (Node next in SectionSuccessors(node))
+            {
+                todo.Push(next);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Cuts every literal into <c>k + 1</c> pieces, or returns <see langword="null"/> when there
     /// would be too many pieces in all, or any would be shorter than <see cref="MinPieceLength"/>.
     /// </summary>
@@ -1069,6 +1294,30 @@ internal sealed class FuzzyLiteralFilter
         {
             memory.From.AsSpan().Fill(int.MaxValue);
             memory.SliceEnd = sliceEnd;
+            memory.RequiredStretchStart = -1;
+        }
+
+        // Item 8: a required literal only refuses. A stretch known to start at or after this
+        // position answers every attempt up to it without scanning again; past it, the scan looks
+        // for the next one, and finding none refuses the rest of the slice.
+        if (Required)
+        {
+            if (textPos <= memory.RequiredStretchStart)
+            {
+                return textPos;
+            }
+
+            int stretch =
+                _scan is null || memory.TakePausedQuery()
+                    ? textPos
+                    : ScanNextStart(_scan, text, textPos, sliceEnd, memory, state);
+            if (stretch < 0)
+            {
+                return stretch;
+            }
+
+            memory.RequiredStretchStart = stretch;
+            return textPos;
         }
 
         // Behind the pieces, the scan arms only from the scan's second query: the first piece
@@ -1350,6 +1599,12 @@ internal sealed class FuzzyLiteralFilter
         internal int SliceEnd { get; set; }
 
         /// <summary>
+        /// Item 8: where a stretch within <c>k</c> edits of a required literal is known to start
+        /// in the current slice, or -1; see <see cref="Required"/>.
+        /// </summary>
+        internal int RequiredStretchStart { get; set; }
+
+        /// <summary>
         /// Reverse: per piece, a position <c>x</c> such that the piece is not in
         /// <c>[SliceStart, x)</c>; <c>int.MinValue</c> for unknown.
         /// </summary>
@@ -1409,6 +1664,7 @@ internal sealed class FuzzyLiteralFilter
             From.AsSpan().Fill(int.MaxValue);
             Found.AsSpan().Fill(Absent);
             SliceEnd = -1;
+            RequiredStretchStart = -1;
             AbsentBelow.AsSpan().Fill(int.MinValue);
             WitnessEnd = int.MaxValue;
             SliceStart = -1;
