@@ -56,17 +56,19 @@ How common swaps are among typing errors:
   all of these figures to its companion paper [9], the 1983 JASIS paper below, and gives no
   per-kind table of its own.
 - Pollock & Zamora (1983), *Collection and characterization of spelling errors in scientific and
-  scholarly text*, JASIS 34(1):51-58. Only the abstract was read (Wiley's page, 2026-11-06); the
-  PDF answered 403, behind the paywall. The abstract gives over 50,000 misspellings from about
-  25,000,000 words, an incidence of 0.2%, "90-95% of spelling errors have only a single mistake",
-  "omission is the commonest type" and "transposition is heterogeneous", but no per-kind
-  percentages. The per-kind split therefore rests on a secondary source (the thesis at
-  https://arxiv.org/pdf/cmp-lg/9702003, chapter 2, read 2026-11-06) and stays unverified against
-  the paper: 7.5% of misspellings had more than one error, and the rest were
-  deletions 34%, insertions 27%, substitutions 19% and transpositions 12.5%. These add up to
-  92.5%, so they are shares of all misspellings, not of single errors. The 1984 paper agrees with
-  them where it overlaps: substitutions under 20%, and insertions (27%) about twice transpositions
-  (12.5%).
+  scholarly text*, JASIS 34(1):51-58. The full text is behind Wiley's paywall (the PDF answered
+  403, 2026-11-06); the abstract and the paper's figures were read. The abstract gives over 50,000
+  misspellings from about 25,000,000 words, an incidence of 0.2%, "90-95% of spelling errors have
+  only a single mistake", "omission is the commonest type" and "transposition is heterogeneous".
+  The per-kind split is the paper's own Fig. 4, "Distribution of spelling errors" (image from
+  Semantic Scholar's figure extraction, `.scratch/papers/pz1983/4-Figure4-1.png`, read
+  2026-11-06): of all 52,963 misspellings, omissions 34%, insertions 27%, substitutions 19%,
+  transpositions 12.5% and more than one error 7.5%. The shares sum to 100%, so they are shares of
+  all misspellings, single errors 92.5% of them. Transpositions per database run 10-15% (CA 13%,
+  ACS 13%, ACS-2 15%, DOLE 11.5%, BA 15%, CIN 12.5%, ISA 10%), apart from PI's 40% on only 80
+  misspellings. The 1984 paper agrees where it overlaps: substitutions under 20%, and insertions
+  (27%) about twice transpositions (12.5%). Damerau's 2.4% (above) comes from a small sample
+  dominated by equipment faults, not keyboarding.
 - Rates vary by language and input method (2.6% and 13.1% in two Sindhi corpora,
   https://arxiv.org/pdf/1403.4759). The figures describe human typing, not machine-generated text.
 
