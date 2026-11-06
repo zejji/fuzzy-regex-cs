@@ -15,7 +15,9 @@ and its upstream answer. It is turned on in either of two ways:
 - **Decided:** an explicit `t` in a fuzzy constraint, such as `{t<=1}` or `{1i+1d+1s+1t<=2}`,
   which allows swaps in that section with or without the flag.
 - **Decided:** with neither, behaviour is exactly today's: a swap costs two errors (two
-  substitutions, or a deletion plus an insertion).
+  substitutions, or a deletion plus an insertion). The one exception is a pattern holding a
+  literal brace group that starts with `t`, such as `{t<=1}`, which becomes a constraint; hence
+  release 2.0.0 (10.13).
 
 This is the first addition of pattern syntax that upstream lacks. Every earlier difference from
 upstream was API shape, speed or a fixed bug (`docs/DIVERGENCES.md`; `AGENTS.md:129-131`, "do not
@@ -54,9 +56,13 @@ How common swaps are among typing errors:
   all of these figures to its companion paper [9], the 1983 JASIS paper below, and gives no
   per-kind table of its own.
 - Pollock & Zamora (1983), *Collection and characterization of spelling errors in scientific and
-  scholarly text*, JASIS 34(1):51-58. **Not read** (Wiley needs a session). The per-kind split
-  rests on it alone, through a secondary source (the thesis at https://arxiv.org/pdf/cmp-lg/9702003,
-  chapter 2, read 2026-11-06): 7.5% of misspellings had more than one error, and the rest were
+  scholarly text*, JASIS 34(1):51-58. Only the abstract was read (Wiley's page, 2026-11-06); the
+  PDF answered 403, behind the paywall. The abstract gives over 50,000 misspellings from about
+  25,000,000 words, an incidence of 0.2%, "90-95% of spelling errors have only a single mistake",
+  "omission is the commonest type" and "transposition is heterogeneous", but no per-kind
+  percentages. The per-kind split therefore rests on a secondary source (the thesis at
+  https://arxiv.org/pdf/cmp-lg/9702003, chapter 2, read 2026-11-06) and stays unverified against
+  the paper: 7.5% of misspellings had more than one error, and the rest were
   deletions 34%, insertions 27%, substitutions 19% and transpositions 12.5%. These add up to
   92.5%, so they are shares of all misspellings, not of single errors. The 1984 paper agrees with
   them where it overlaps: substitutions under 20%, and insertions (27%) about twice transpositions
@@ -82,11 +88,9 @@ How common swaps are among typing errors:
   (https://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance;
   https://rapidfuzz.github.io/RapidFuzz/Usage/distance/OSA.html).
 - **Navarro 2001:** G. Navarro, *A guided tour to approximate string matching*, ACM Computing
-  Surveys 33(1):31-88, read 2026-11-06 from
-  https://users.csc.calpoly.edu/~dekhtyar/570-Fall2011/papers/navarro-approximate.pdf. Page
-  numbers below are those printed in that copy, which carries the journal's running heads. A
-  review reading another copy found the transposition definition on p. 38 rather than p. 37, so
-  the pages were not checked against the printed journal.
+  Surveys 33(1):31-88, read 2026-11-06 from the journal PDF (`.scratch/papers/navarro2001.pdf`).
+  Page numbers below are the journal's printed ones: the transposition definition is on p. 37
+  (section 3.1) and the remark on filters and transpositions on p. 64 (section 8.2.3).
 - **Wagner & Fischer 1974**, *The string-to-string correction problem*, JACM 21(1):168-173, read
   2026-11-06: the base algorithm, with three operations (change, delete, insert), "based on three
   of Morgan's operations" (p. 168).
@@ -103,18 +107,31 @@ here. Nothing was taken from memory.
 | Apache Commons Text | Yes (OSA), separate class | Read from source: `DamerauLevenshteinDistance` (`@since 1.15.0`; 1.15.0 reached Maven Central on 2025-12-04) links to Wikipedia's OSA section and its `unlimitedCompare` javadoc says "using optimal string alignment". `LevenshteinDistance` has no swaps. Not run. |
 | RapidFuzz 3.14.6 | Both, as two functions | Measured: `OSA` and `DamerauLevenshtein` (unrestricted) give 3 and 2 for "CA" to "ABC". Neither has an `editops` method (measured `hasattr` false), so both return a number, never which edits. |
 | jellyfish 1.3.0 | Unrestricted only | Measured: `damerau_levenshtein_distance("CA","ABC")` = 2. No OSA function in the module. |
-| fuzzy-regex-rs (Rust) | Yes, on by default, OSA | Read from source at commit `d3c0a577` (2026-08-11); not run (no Rust toolchain here). `e` includes swaps unless a builder option `mrab_compat` is set (`src/api/builder.rs:165-173`). A swap consumes both characters and the next step only clears a flag, so the pair is never edited again (`src/engine/damlev.rs:212-221`, `531-541`); its tests check against a reference named "optimal-string-alignment (restricted Damerau)" (`src/engine/bitap.rs:4033-4035`). A swap needs the two pattern characters to differ (`damlev.rs:566-570`). Among candidates it prefers the leftmost, then fewest edits, then fewest insertions plus deletions, then the longest (`damlev.rs:648-660`). `fuzzy_counts()` is still the `(s, i, d)` triple without swaps; swaps are read from `edits().swaps` (`src/api/match_result.rs:244-257`). Naming `i`, `d` or `s` zeroes `t` unless `t` is named; naming `t` does not zero the others (`src/parser/ast.rs:201-214`, `278-286`). |
+| fuzzy-regex-rs v0.2.0 (Rust) | Yes, on by default, OSA, only within one run of literal text | Measured: built and run in `rust:1.88-slim` (`.scratch/research/frr/run.log`, `.scratch/frr-probe/run.log`). Swaps are allowed inside `e`: `(?:tesco){e<=1}` matches "tecso". The default answers like upstream's `(?b)`, not leftmost-first: `(?:abc){e<=1}` in "xbc abc" gives the exact (4,7). `fuzzy_counts()` omits swaps ((0,0,0) for a one-swap match); they appear only in `edits().swaps` and the total. `{t<=1}` alone also allows a deletion ("tesc") and a substitution ("texco"). A capped `t` missing from a cost equation is not free: `{t<=1,1i+1d+1s<=1}` refuses "tecso", against its own source comment; `{1i+1d+1s+1t<=1}` also refuses it, while `<=2` accepts. Test sets are ignored for swaps. `{1<=t<=1}` is an error ("range constraint only valid for 'e'"); `(?r)` is a parse error. No swap across a class, a repeat edge or a group edge (`\d-\d` "-12", `[a-c][x-z]` "xa", `tes(co)` "tecso", `(a)(b)` "ba"); a swap inside a capture group works (`te(sc)o`). Apparent defects: `(?:abc\|tesco){t<=1}` refuses "tecso" although `(?:ab\|cd){t<=1}` swaps "ba", and `(?:\w+ jumps over){e<=1}` refuses "the fox jumsp over". Read from source: `mrab_compat` turns swaps off (`src/api/builder.rs:165-173`); swaps live only in the literal automata (`src/engine/fuzzy_bridge.rs:117-210`). |
+| NR-grep 1.1.2 (Navarro) | Yes, on by default (`-k<n>`; `-k<n>[idst]` picks kinds) | Measured: built in `gcc:14` and run (`.scratch/research/nrgrep/probe.log`, `probe2.log`). `tesco` `-k1t` matches "tecso" and refuses "tesc" and "texco" (`t` alone means swaps only). With `-x` (whole line) a swap crosses classes (`[0-9]-[0-9]` "-12", `[a-c][x-z]` "xa"), `.` (`a.` "Xa") and an alternation edge (`x(y\|z)` "yx"), but not inside literal alternatives (`(ab\|cd)` "ba", `(abc\|tesco)` "tecso": no match in either mode). At a repeat edge only in substring mode (`a+b` "ba", `ab+` "ba": match without `-x`, none with it). `-i` works with `t` on ASCII. No test sets, no partial matching, no error counts, no capture groups. |
+| liblevenshtein 4.0.0-rc.5 (Rust) | Yes, `Algorithm::Transposition` (OSA); unrestricted refused for regexes | Measured: the crates.io release built and run in `rust:1.95-slim` (`.scratch/research/liblev/run.log`, `run2.log`); the GitHub master does not build alone (sibling path dependencies). A whole-string acceptor that reports a distance only: no search, spans, partial matching or test sets. A swap counts once across classes (`[a-c][x-z]` "xa" = 1), repeat edges (`ab+` "ba" = 1), alternation (`(abc\|tesco)` "tecso" = 1) and capture groups (`(a)(b)` "ba" = 1); "ca" against "abc" exceeds a budget of 2, so the form is OSA. |
+| FREJ (Java) | Yes, OSA recurrence | Read from source: `Fuzzy.java:31-36` names "swap of two adjacent chars" as one of four mistakes, `:289-291` is the OSA step. It compares one pattern word with one input token; its regex tokens match exactly. Case by `Character.toUpperCase`, one character to one. Not run. |
+| uFuzzy (npm) | Yes, at most one error per term | README read: `intraMode: 1` allows one substitution, transposition, insertion or deletion per literal term, each switchable (`intraTrn`); always case-insensitive. Not run. |
+| fuzzy-aho-corasick 0.5.2 (Rust) | Yes, literal patterns only | Read from source: insertions, deletions, substitutions and swaps with per-pattern caps; case-insensitive mode lower-cases per grapheme; its bit-parallel prefilter charges a swap as 2 (`src/search.rs:509-552`). Not run. |
+| IOCCC 2011 "fredriksson" (C) | Yes, `-t` | README read: "'ab' matches 'ba' with one transposition"; patterns of literals, `.` and classes. The source is obfuscated and was not run, so how a swap meets a class is not known. |
 | mrab-regex (upstream) | No | Issue #400, "Fuzzy matching should support for Damerau-Levenshtein distance", migrated from Bitbucket by mrabarnett on 2021-01-28, labelled enhancement and major; open, no comments, 3 thumbs-up (read 2026-11-06; triaged A in `2026-08-31-upstream-issue-triage.md:38`). Measured with `regex` 2026.9.29: `{t<=1}` is literal text (section 10.13). |
 | TRE | No | Read from the local source (`.venvs/tre-src`, commit `71bfcaf0`, 2026-05-23): `include/tre/tre.h:238-243` has costs and maxima for insertion, deletion and substitution only, and `TODO:24` lists "Transposition operation for the approximate matcher?" |
 | Hyperscan 5.4.1 | No | Read: "three possible edit types considered: insertion, removal and substitution" (https://intel.github.io/hyperscan/dev-reference/compilation.html). |
 | PostgreSQL 18 `fuzzystrmatch` | No | Read: `levenshtein` takes insertion, deletion and substitution costs; no transposition function in the module. |
 | Python `fuzzysearch` | No | Read: README names Levenshtein distance, substitutions, insertions and deletions only. |
 | Perl `String::Approx` 3.28 | No | Read: its notes say a transpose needs an edit distance of two. |
-| agrep (Wu-Manber) | No, **unverified** | Not read from source. Secondary only: Wu and Manber describe insertions, deletions and substitutions; Navarro 2001 section 8.2.3 adapts their filter to transpositions as an extension. |
+| agrep 3.41 (Wu-Manber) | No | Read from source (Wikinaut mirror): costs for deletion, insertion and substitution only (`agrephlp.c:129-132`); the one "transposition" in `bitap.c` means lower-casing. |
+| ugrep 7.8.5 `-Z` | No | Measured: `-Z1 tesco` misses "tecso", `-Z2` finds it; `--help fuzzy` names insertions, deletions and substitutions. |
 
-The search libraries that count swaps use the restricted form and turn it on by default.
-Distance libraries offer both forms, and return a number without an explanation. Among regex
-engines only fuzzy-regex-rs counts swaps; it turns them on by default and offers an opt-out.
+Among pattern matchers, swaps exist in fuzzy-regex-rs, NR-grep and liblevenshtein (measured) and
+in FREJ, uFuzzy, fuzzy-aho-corasick and the IOCCC entry (read). Every one whose form could be
+checked uses the restricted form (OSA), and the regex ones turn swaps on by default. They differ
+most on scope: fuzzy-regex-rs swaps only inside one run of literal text, NR-grep across classes
+and alternation edges, liblevenshtein across everything. Only fuzzy-regex-rs was found with test
+sets, and it ignores them for swaps. Distance libraries offer both forms
+and return a number without an explanation. Other engines checked and found without swaps (TRE
+bindings, prex, ZGorlock FuzzyRegex, fuzzysearch, Vespa and more) are listed in
+`.scratch/research/AGENT-FINDINGS.md`, task 1.
 
 ## 5. Semantics
 
@@ -126,10 +143,12 @@ advances past both items and both characters. Each swapped character is used by 
 so the engine is restricted (OSA) by construction. Unrestricted Damerau-Levenshtein would need the
 engine to remember earlier edits and is not proposed.
 
-A first version allows swaps **only inside a literal** (`STRING` and its case-insensitive forms),
-where both items are characters of one node. Swaps across nodes (a class followed by another node,
-a group boundary, a repeat, `END_FUZZY`, a call) and under full case folding (ß folding to "ss")
-are refused in the first version and listed as open questions.
+A first version allows swaps **only inside a literal as written**: two adjacent literal characters
+of the pattern, even where the compiler splits the literal into several nodes (under version 1 a
+case-insensitive literal is split at "st", "ss", "fi", "ff" and "fl", question 10.10). Swaps
+involving a class, a repeat edge, a group edge, an alternation edge, `END_FUZZY` or a call are
+refused in the first version (10.10). Under full case folding a swap is tried only when both
+swapped characters fold to one character each (10.11).
 
 ### 5.2 How `t` combines with the other kinds (proposal)
 
@@ -209,9 +228,9 @@ What a fourth kind adds:
   `"dis"`). **Corrected 2026-11-06:** today `t` is not a parse error. A brace group that does not
   parse as a quantifier or a constraint is literal text (`Parsing/ParseFunctions.cs:398-427`, the
   `ParseErrorException` caught at `:671`), so `(?:ab){t<=1}` matches the eight characters
-  "ab{t<=1}". Measured upstream 2026-11-06 (`regex` 2026.9.29, span (0, 8)); this port follows the
-  same code path but was not run (no .NET runs during the timing window). Recognising `t` changes
-  the meaning of such patterns (question 10.13).
+  "ab{t<=1}". Measured 2026-11-06 on upstream (`regex` 2026.9.29, span (0, 8)) and on this port
+  (span (0,8); `a{t}` matches "a{t}" too; `.scratch/research/port/port.log`). Recognising `t`
+  changes the meaning of such patterns (question 10.13).
 - **Defaults.** Adding `t` to `SpecificErrorTypes` as it stands would be wrong: when a constraint
   names none of the specific kinds, the fallback at `Parsing/Nodes.cs:4699-4707` makes every
   unnamed kind unlimited, so `{e<=2}` would allow swaps with the flag off. Part of the flag's
@@ -257,9 +276,10 @@ cover.
   of one character between each pair of pieces, so that the transposition cannot alter both".
   Every later filter that takes the same `k` inherits the problem. Question 10.12 lists them.
 - Size: a literal-only first version touches the parser, the permission and cost functions, the
-  string arms, the prefilter, the public types and the docs. Swaps across nodes, case folding and
-  partial matching add several times that. Comparable to the larger D-series fixes, each of which
-  needed several blind-review rounds.
+  string arms (with the look-ahead into the next node of the same written literal, 10.10), the
+  prefilter, the public types and the docs. Classes (tier 1) and whole-character swaps under full
+  folding (10.11 D) would each be a later step of their own. Comparable to the larger D-series fixes, each of
+  which needed several blind-review rounds.
 
 ## 8. Verification
 
@@ -272,8 +292,11 @@ judge them. Proposed instead, under `docs/VERIFICATION.md`'s rules:
    compared with the engine under `BestMatch` (minimum cost) on generated literals and subjects.
 3. **fuzzy-regex-rs as a second comparator** (already an external comparator, `S63-performance-gate.md`),
    with care: its `e` includes swaps by default, so compare against this port with the flag on;
-   it reads `{e<=2,t<=1}` differently (question 10.3) and ranks ties differently (10.5), so
-   compare only constraints where the two agree, and spans and totals rather than counts.
+   its default answers like `(?b)`, so compare against `BestMatch`; it reads `{t<=1}` and cost
+   equations differently (questions 10.3, 10.4), ignores test sets for swaps, has no partial
+   matching in upstream's sense and no `(?r)`, and refuses some swaps it should find (section 4).
+   So compare plain literals under `e` only, spans and totals rather than counts, and treat a
+   difference as a lead to check, not a verdict.
 4. **Metamorphic invariants** (`docs/ORACLE-INVARIANTS.md`): allowing swaps never removes a match;
    with the flag, the best cost is at most the cost without it; reported counts add up to `Total`.
 5. **A soundness argument for the prefilter change,** with a witness test that fails without it
@@ -322,28 +345,35 @@ Worth documenting the first in `GUIDE.md` whether or not the feature is built.
 - 10.15: **A** - no comment on #400 now; reconsider commenting when 2.0.0 ships.
 - 10.1: **A** (OSA). 10.2: **No** (equal characters never count). 10.3: **A** (`t` follows the same
   zeroing rule as `i`, `d`, `s`; with nothing named, `t` only under the flag). 10.4: **A**.
-- 10.5 and 10.6 open; to be decided together. Measured 2026-11-06 (fuzzy-regex-rs v0.2.0 built in the
+- 10.5: **B** - the swap is tried first, only when it fits; ties fall to the search order as for
+  `i`, `d`, `s` today; `(?e)`/`(?b)` remain the way to ask for the cheapest answer. A
+  fuzzy-regex-rs-style ranking mode (best match plus its tie rule, behind a new opt-in flag) may be
+  added later without changing any default. 10.6: **A** - the counts promise one valid explanation
+  within the budget, the cheapest only under `BestMatch`/`EnhanceMatch`, stated in the docs.
+  Measured 2026-11-06 (fuzzy-regex-rs v0.2.0 built in the
   official `rust:1.88-slim` container, probe `.scratch/frr-probe/`): its default behaves like
   upstream's `(?b)` (fewest edits anywhere: `(?:abc){e<=1}` in "xbc abc" gives (4,7) exact, upstream
   plain (0,3)), not "leftmost then fewest" as read from its source; swaps are on inside `e`
   (`(?:tesco){e<=1}` matches "tecso"); `fuzzy_counts()` omits swaps ((0,0,0), total 1); ties differ
   from upstream `(?b)` ("abxc": insertion (0,4) against substitution (0,3)); its `(?e)` answers like
   upstream plain; no swap across a class and a literal (`\d-\d` in "-12" gives "-1" with a deletion).
-  Section 4 and 10.5's fuzzy-regex-rs lines need correcting accordingly. NR-grep (Navarro) also
-  supports swaps, across pattern items (`.scratch/transposition-engine-survey.md`); section 4 to
-  correct.
+  Section 4 and 10.5 are corrected accordingly, and section 4 now has NR-grep, liblevenshtein and
+  four more engines with swaps, from the evidence in `.scratch/research/EVIDENCE.md`.
 
 Rewritten 2026-11-06, then revised the same day after a blind review and after reading the
 primary papers (Damerau 1964, Lowrance & Wagner 1975, Wagner & Fischer 1974, Pollock & Zamora
 1984; PDFs in `.scratch/papers/`). Each question gives the context with an example, the options with their
 pros and cons, what other engines do, and a recommendation with what would change it.
 
-How the evidence was gathered: Python `regex` 2026.9.29 from `.venvs/regex-2026.9.29`, and
-RapidFuzz 3.14.6 and jellyfish 1.3.0 from `.scratch/transpositions-venv`, all run with
-`python -I` on 2026-11-06. This port was **not** run, because a timing run held the machine; where
-a question says what the port does, it is read from the code and says so. Rows that describe the
-feature itself are derived from the engine's search order and the measured upstream rows, since
-the feature does not exist yet.
+How the evidence was gathered, all on 2026-11-06: Python `regex` 2026.9.29 from
+`.venvs/regex-2026.9.29`, and RapidFuzz 3.14.6 and jellyfish 1.3.0 from
+`.scratch/transpositions-venv`, run with `python -I`; this port (Release, main of 2026-11-06)
+run side by side with upstream on the rows of 10.8, 10.9, 10.11 and 10.13
+(`.scratch/research/port/`); fuzzy-regex-rs v0.2.0, NR-grep 1.1.2 and liblevenshtein 4.0.0-rc.5
+built and run in containers (`.scratch/research/EVIDENCE.md`, raw logs beside it). Where a
+question says what the port does without a measured row, it is read from the code and says so.
+Rows that describe the feature itself are derived from the engine's search order and the
+measured rows, since the feature does not exist yet.
 
 The research items of the old list are done and folded in: the primary sources (section 2, with
 what could not be read and why), Lucene's default and fuzzy-regex-rs's semantics (section 4, read
@@ -353,23 +383,23 @@ from source), and demand (10.16). The old questions are all here: 1 is 10.5, 2 i
 
 | # | Question | Recommendation | Confidence |
 |---|---|---|---|
-| 10.1 | How far apart may swapped characters be; may a swapped pair be edited again? | Adjacent only, never edited again (OSA) | High |
-| 10.2 | Does a swap of two equal characters count? | No: only when the pair fails to match in order | High |
-| 10.3 | Does naming `t` zero the kinds a constraint does not name? | Yes, the same rule as `i`, `d`, `s`; with nothing named, `t` is unlimited only under the flag | High |
-| 10.4 | `t` and cost equations | Upstream's rules unchanged, `t` treated like the others | High |
+| 10.1 | How far apart may swapped characters be; may a swapped pair be edited again? | **Decided A:** adjacent only, never edited again (OSA) | - |
+| 10.2 | Does a swap of two equal characters count? | **Decided No:** only when the pair fails to match in order | - |
+| 10.3 | Does naming `t` zero the kinds a constraint does not name? | **Decided A:** the same rule as `i`, `d`, `s`; with nothing named, `t` is unlimited only under the flag | - |
+| 10.4 | `t` and cost equations | **Decided A:** upstream's rules unchanged, `t` treated like the others | - |
 | 10.5 | Where the swap sits in the search order, and how ties fall | First, tried only when it fits; ties fall to search order, as for `i`, `d`, `s` today | Medium |
 | 10.6 | What the counts promise | One valid explanation; a cheapest one only under `BestMatch`/`EnhanceMatch` | High |
 | 10.7 | Folded into 10.5 | | |
-| 10.8 | Edit tests, `{t<=1:[a-z]}` | Both swapped characters must pass, by the substitution analogy | Medium |
-| 10.9 | Partial matching halfway through a swap | Accept it as one transposition, as upstream does for its own edits | High |
-| 10.10 | Swaps across nodes | Literals (named lists included) only in the first version; never across a capture boundary | Medium |
-| 10.11 | Case folding | Swaps in the full-fold arm from the first version, when each swapped character folds to one | Medium |
-| 10.12 | The prefilters | Add the most swaps allowed to `k` in every filter that uses it | High |
-| 10.13 | `{t...}` is literal text today | Recognise `t` anyway, with a release note; amends a decided item; **owner** | Medium |
-| 10.14 | Flag name, bit, inline letter, counts | `Transpositions`, a high bit, no letter, a non-positional property | High |
-| 10.15 | Comment on upstream #400? | Not now; **owner** | Medium |
-| 10.16 | Build it, or document the workaround? | Document the workaround now; build when demand shows; **owner** | Medium |
-| 10.17 | Where the fourth kind lives in a `FUZZY` node's values | A separate tail block, emitted only when `t` or the flag is in use | Medium |
+| 10.8 | Edit tests, `{t<=1:[a-z]}` | At least one of the two swapped characters must be in the set: exactly today's acceptance at cost 2 | High |
+| 10.9 | Partial matching halfway through a swap | Accept it, charged one transposition, as upstream charges its own edits at the edge | High |
+| 10.10 | Swaps across nodes | The literal as written, across the nodes V1 splits it into; nothing else in the first version; never across a capture edge | High |
+| 10.11 | Case folding | Swap only characters that fold to one character each; ß and ligatures fall back to today's edits | High |
+| 10.12 | The prefilters | `k` plus the most swaps allowed, in every filter and scan; soundness proved exhaustively | High |
+| 10.13 | `{t...}` is literal text today | **Decided A:** always recognise `t`; ships as 2.0.0 with a release note | - |
+| 10.14 | Flag name, bit, inline letter, counts | `Transpositions`, bit `0x40000000`, no inline letter, a non-positional counts property | High |
+| 10.15 | Comment on upstream #400? | **Decided A:** not now; reconsider when 2.0.0 ships | - |
+| 10.16 | Build it, or document the workaround? | **Decided B:** build the literal-only version after 1.3; document the workaround now | - |
+| 10.17 | Where the fourth kind lives in a `FUZZY` node's values | A separate block, present only when `t` or the flag is in use | High |
 
 ### 10.1 How far apart may the swapped characters be, and may a swapped pair be edited again?
 
@@ -467,7 +497,9 @@ What the rows say:
   any distance (arithmetic, not measured on data), so the set of strings one error away from a
   word grows, and with it the false matches.
 
-**What other engines do.** Every engine that counts swaps in a budget uses A (section 4). B
+**What other engines do.** Every engine that counts swaps in a budget and whose form could be
+checked uses A: liblevenshtein (measured: "ca" against "abc" exceeds 2), fuzzy-regex-rs and FREJ
+(read from source), Lucene and Commons Text (documented). NR-grep's form was not probed. B
 appears only in distance functions.
 
 **Recommendation: A.** It is the definition, the industry default and the only form that fits
@@ -499,7 +531,8 @@ itself is not an error.
 - **B. No rule.** Cons: duplicate paths and a spurious error.
 
 **What other engines do.** fuzzy-regex-rs requires the two pattern characters to differ
-(`damlev.rs:566-570`).
+(`damlev.rs:566-570`, read). Measured, it rejects `{1<=t<=1}` ("range constraint only valid for
+'e'"), and `(?:aa){1<=e<=1}` in "aa" answers (1,2) with one deletion, not a swap.
 
 **Recommendation: A.** Confidence high.
 
@@ -531,12 +564,14 @@ does not).
 - **B. `t` never zeroes the others.** Then `{e<=2,t<=1}` means "two errors, at most one a swap".
   But `{t<=1}` alone would leave `i`, `d`, `s` unlimited (no `e` either), so it needs a second
   rule: "a constraint that names only `t` means `t` only".
-  Pros: matches fuzzy-regex-rs. Cons: two rules, one of them unlike anything upstream has.
+  Pros: close to fuzzy-regex-rs. Cons: two rules, one of them unlike anything upstream has.
 
-**What other engines do.** fuzzy-regex-rs chose B: "Transposition (`t`) is a fuzzy-regex extension
-that mrab lacks, so it does NOT trigger this defaulting on its own: `{t<=1,e<=2}` leaves i/d/s
-governed by the `e` budget" (`src/parser/ast.rs:211-214`). How it treats `{t<=1}` alone was not
-established (not run).
+**What other engines do.** fuzzy-regex-rs chose B without the second rule: "Transposition (`t`) is
+a fuzzy-regex extension that mrab lacks, so it does NOT trigger this defaulting on its own"
+(`src/parser/ast.rs:211-214`). Measured: `{t<=1}` alone also accepts "tesc" (a deletion) and
+"texco" (a substitution), `{e<=2,t<=1}` accepts "txcso" (a substitution and a swap), and naming
+`i` still zeroes `d` (`{t<=1,i}` refuses "tesc"). NR-grep's `-k1t` means swaps only: it refuses
+"tesc" and "texco" (measured).
 
 **The other half of the rule: a constraint that names nothing.** Upstream makes every unnamed
 kind unlimited then (`Nodes.cs:4699-4707`). If `t` simply joined that list, `{e<=2}` would allow
@@ -576,10 +611,11 @@ equation, as in `{t<=1,1i+1d+1s<=2}`.
 - **C. A parse error when `t` is capped but missing from the equation.** Cons: rejects for `t` what
   upstream accepts for the other three.
 
-**What other engines do.** fuzzy-regex-rs zeroes an unnamed `t` once any kind is in play, and
-treats a capped kind missing from the equation as free: "operations priced at 0 (explicitly capped
-but absent from the equation, so mrab matches them for free) may all be used"
-(`src/parser/ast.rs:278-286`, `301-305`). That is A.
+**What other engines do.** fuzzy-regex-rs's source says a capped kind missing from the equation
+is free: "operations priced at 0 (explicitly capped but absent from the equation, so mrab matches
+them for free) may all be used" (`src/parser/ast.rs:278-286`, `301-305`). Measured, it is not:
+`{t<=1,1i+1d+1s<=1}` refuses "tecso". It also refuses "tecso" under `{1i+1d+1s+1t<=1}`, where one
+swap at cost 1 fits, and accepts it under `<=2`. So it matches none of A, B or C.
 
 **Recommendation: A.** Confidence high. Without a cost equation the engine builds one with every
 coefficient 1 (`Nodes.cs:4721-4729`), so with the flag on, `{e<=1}` prices a swap at 1, as section
@@ -638,9 +674,14 @@ main, A-B-B-A for small effects). Where the swap's value is stored is question 1
 first while it sits after deletion in numbering means the walk over `fuzzy_type` cannot be a plain
 increment, which is a local change to the walk.
 
-**What other engines do.** No regex engine with a search order has swaps except fuzzy-regex-rs,
-whose automaton keeps every path and picks by fewest edits, then fewest insertions plus deletions,
-then the longest (`damlev.rs:648-660`). It would answer (0,2) on "ba" by those rules (not run).
+**What other engines do.** No backtracking engine with a search order has swaps. fuzzy-regex-rs
+keeps every path and picks by fewest edits (`damlev.rs:648-660`, read). Measured:
+`(?:ab){e<=1}` in "ba" gives (0,2), one swap, and `(?:tesco){e<=2}` in "tecso" one swap, so it
+agrees with option B on both rows. Its default is fewest edits anywhere, like upstream's `(?b)`:
+`(?:abc){e<=1}` in "xbc abc" gives the exact (4,7), where upstream without flags gives (0,3). Its
+ties differ from upstream's `(?b)`: "abxc" gives (0,4) with an insertion, upstream (0,3) with a
+substitution. NR-grep and liblevenshtein report whether, or how far, the text matches, not which
+edits, so they say nothing about order.
 
 **Recommendation: B, with ties left to the search order as for `i`, `d`, `s` today, pinned by
 tests** on the two rows above, with and without `(?b)`. Confidence medium: the semantics are
@@ -665,7 +706,8 @@ cheapest explanation. Measured upstream on the same text: `(?:tesco){i<=1,d<=1}`
 
 **What other engines do.** RapidFuzz's `OSA` and `DamerauLevenshtein` return a number with no
 explanation (no `editops`, measured); Lucene returns matching terms, not edits; fuzzy-regex-rs keeps
-the fewest-edit path per start (`damlev.rs:611-619`).
+the fewest-edit path per start (`damlev.rs:611-619`, read), and its `fuzzy_counts()` reports a
+one-swap match as (0,0,0), the swap visible only in `edits().swaps` and the total (measured).
 
 **Recommendation: A**, stated in the XML docs of `FuzzyCounts` and in `GUIDE.md`. Confidence high.
 
@@ -678,208 +720,393 @@ attempt the first path found wins, so ties already fall to search order for `i`,
 
 ### 10.8 Edit tests: `{t<=1:[a-z]}`
 
-**Context.** A test set limits the characters an edit brings into the match (`COMPARISON.md`,
-"constrain which characters an edit may touch"). Measured upstream, one kind at a time:
+**The question.** When a fuzzy section has a test set, which of the two swapped characters must
+be in the set for the swap to be allowed?
 
-| Pattern | Text (fullmatch) | Result | What was tested |
+**Context.** A test set is the `:[...]` after a budget, as in `{e<=1:[a-z]}`. It limits the
+characters an edit may put into the match: an insertion is allowed only if the text character it
+brings in is in the set, a substitution only if the text character it puts in the pattern's place
+is, and a deletion is never tested, because it puts nothing in (`COMPARISON.md`, "constrain which
+characters an edit may touch"). A swap brings in no character the pattern lacks: it puts two of
+the pattern's own characters in each other's places. Today the engine explains the same text with
+two edits, and the two explanations test different characters:
+
+- two substitutions test both swapped characters;
+- an insertion plus a deletion tests only the inserted one, and either of the two can be the one
+  inserted.
+
+So today, at a cost of 2, a swapped pair is accepted when at least one of its two characters is
+in the set. Example: `(?:tesco){e<=2:[c]}` against "tecso" matches as one insertion of "c" and
+one deletion, although "s" is not in the set.
+
+**Measured: upstream 2026.9.29 and this port**, identical on every row (search):
+
+| Pattern | Text | Answer | Swapped characters in the set |
 |---|---|---|---|
-| `(?:ab){i<=1:[a-z]}` | a1b | no match | the inserted "1" |
-| `(?:a1b){d<=1:[a-z]}` | ab | (0,2), one deletion | nothing: a deletion brings in no character |
-| `(?:a-b){s<=2:[a-z]}` | -ab | no match | each substituted text character ("-" fails) |
-| `(?:a-b){e<=2:[a-z]}` | -ab | (0,3), (0,1,1), changes ([], [1], [0]) | the inserted "a" only |
+| `(?:tesco){e<=2:[cs]}` | tecso | (0,5), two substitutions | both |
+| `(?:tesco){e<=2:[c]}` | tecso | (0,5), one insertion and one deletion | one |
+| `(?:tesco){e<=2:[xyz]}` | tecso | (0,3) "tec", two deletions; the whole word is refused | neither |
+| `(?:a1){e<=2:[0-9]}` | 1a | (0,1) "1", one substitution and one deletion | one |
+| `(?:ab){i<=1:[a-z]}` | a1b | no match: the inserted "1" is tested | - |
+| `(?:a1b){d<=1:[a-z]}` | ab | (0,2), one deletion: a deletion is not tested | - |
 
-The last row moves the "a" (delete it, insert it after the hyphen), so only the letter is tested
-and the hyphen moves freely. A test set does not keep punctuation in place today.
-
-A swap brings in two text characters, and each lands in the place of the other's pattern
-character, which is what a substitution does to one character. Example:
-`(?:a-b){t<=1:[a-z]}` against "-ab" swaps "a" and "-".
+**Measured: engines with swaps.** fuzzy-regex-rs ignores the set for swaps: `{t<=1:[xyz]}`
+accepts "tecso", `(?:a-b){t<=1:[a-z]}` accepts "-ab" and `(?:a1){e<=1:[0-9]}` accepts "1a", each
+as one swap. For insertions and substitutions it tests as upstream does (`(?:ab){i<=1:[a-z]}` on
+"a1b" and `(?:ab){s<=1:[a-z]}` on "a1": no match). NR-grep and liblevenshtein have no test sets,
+and no other engine with swaps was found with them.
 
 **Options.**
 
-- **A. Both swapped characters must pass**, as each would if the swap were two substitutions.
-  "-ab" is refused at cost 1.
-  Pros: follows from what a swap does, character by character; a swap never accepts what the two
-  substitutions it replaces would refuse under the same test. Cons: stricter than today's
-  insertion-plus-deletion route at cost 2, which accepts "-ab" (last row).
-- **B. At least one must pass**, the insertion-plus-deletion view: one character is moved, and
-  the moved one is tested. "-ab" is accepted.
-  Pros: the same answer as the last row. Cons: which character "moved" is a choice the engine
-  makes, not a fact of the text, so the rule is "either".
-- **C. Not tested**, as a deletion is not, since a swap adds no character the pattern lacks.
-  Cons: makes the test meaningless for swaps.
+- **A. Both swapped characters must be in the set**, as if the swap were two substitutions.
+  Pros: a swap never puts a character where a substitution would be refused.
+  Cons: it refuses at cost 1 what today accepts at cost 2, so turning swaps on does not make every
+  swap the user already gets cheaper. Example: a set of `\s`, written to allow only whitespace
+  errors, against "foob ar" for "foo bar". Only a space has moved, yet A refuses the swap because
+  "b" is not whitespace, while today's insertion plus deletion accepts the text at cost 2 (derived
+  from the rule the `[c]` row shows, not run).
+- **B. At least one must be in the set**, as if the swap were an insertion plus a deletion.
+  Pros: a swap is accepted exactly when today's engine accepts the same text at cost 2 (the first
+  three rows: both, one, neither), so the flag changes the price of a swap and never which texts a
+  set admits. That is checkable against upstream row by row: on a literal whose text differs by
+  one swap, `{t<=1:S}` with the flag must agree with upstream's `{i<=1,d<=1:S}`.
+  Cons: under a letters-only set, a letter may hop over a hyphen at cost 1 (`(?:a-b){t<=1:[a-z]}`
+  accepts "-ab"). Today the same hop costs 2 and is equally accepted.
+- **C. Not tested**, as in fuzzy-regex-rs, on the ground that a swap brings in no new character.
+  Pros: the simplest.
+  Cons: `{t<=1:[xyz]}` accepts "tecso", which no two-edit explanation passes under that set today
+  (third row). The set stops meaning anything for swaps.
 
-**What other engines do.** Not established: fuzzy-regex-rs's handling of test sets with swaps was
-not read. No other engine with swaps has test sets.
-
-**Recommendation: A**, on the substitution analogy. Confidence medium: B is defensible by the
-last row, and the choice is about intent rather than evidence. What would settle it: a user's
-example of a test set used with swaps.
+**Recommendation: B.** Section 1 describes the feature as "a swap costs two errors today; with
+the flag it costs one", and B is the only option that keeps that exactly true when a test set is
+present: the same texts, at half the price. It also turns into a mechanical test against the
+upstream oracle. Confidence high: it rests on the measured cost-2 rows, and nothing else is
+needed to decide.
 
 ### 10.9 Partial matching halfway through a swap
 
-**Context.** A partial match means "the text ran out, and so far nothing contradicts the pattern".
-The `partial-prefix-closure` invariant (`docs/ORACLE-INVARIANTS.md:265-268`) says that if a full
-match exists, every truncation of it inside the span gives a partial match. Example:
-`(?:tesco){t<=1}` with `partial: true` on "tec". The full text "tecso" matches with one swap, and
-"tec" ends after the first swapped character. With `t` alone nothing else can explain the "c".
-Measured upstream for comparison: `(?:tesco){d<=1}` on "tec" gives a partial (0,3) with one
-deletion; `(?:tesco){s<=0}` gives only the empty partial (3,3).
+**The question.** If the text ends between the two characters of a swap, does a partial search
+report a partial match, charged one transposition?
+
+**Context.** A partial search (`partial: true`) answers "so far, so good": the text ran out while
+a match was still open (`GUIDE.md`, "Reading a result"). A search box uses it to keep accepting a
+half-typed entry and to reject one that has gone wrong; an empty partial match at the end of the
+text is how "gone wrong" looks (`COMPARISON.md`, the `2026-0b` example). Example:
+`(?:tesco){t<=1}` on "tec". The whole entry "tecso" matches with one swap. "tec" stops after the
+"c", the first character of the swapped pair: the "c" stands where the pattern has "s", and the
+"s" that would complete the swap has not arrived. With `t` alone, nothing else explains the "c".
+
+**Measured: upstream and this port**, identical; how upstream charges its own edits at the end of
+the text:
+
+| Pattern | Text | Partial answer |
+|---|---|---|
+| `(?:tesco){d<=1}` | tec | (0,3), one deletion |
+| `(?:tesco){s<=1}` | tec | (0,3), one substitution |
+| `(?:tesco){i<=1}` | tecs | (0,4), one insertion |
+| `(?:tesco){s<=0}` | tec | (3,3), the empty partial only |
+| `(?r)(?:tesco){d<=1}` | sco | (0,3), no errors |
+
+Upstream charges the edit the open path has already taken. That edit need not be how the text the
+user goes on to type is explained: "tecs" is charged an insertion, and one insertion completes it
+as "tecsco", not as "tecso". A partial promises that some continuation completes the match.
+
+**Measured: engines with swaps.** fuzzy-regex-rs reports no partial for any prefix: on "tec",
+`{t<=1}`, `{e<=1}` and `{d<=1}` all give no match. Its `partial` flag marks a full match that
+touches the end of the text ("tecso": partial = true), which is a different notion. NR-grep and
+liblevenshtein have no partial matching.
 
 **Options.**
 
-- **A. Accept the half swap at the end of the text as a partial match, counting one
-  transposition** at that position. Pros: keeps the prefix invariant. Cons: the count promises a
-  swap the text has not finished.
-- **B. Refuse it.** "tec" then gets only the empty partial (3,3), though "tecso" matches: the
-  invariant breaks.
-- **C. Accept it but charge nothing.** Cons: lets `{t<=0}` accept it; the budget is wrong.
+- **A. Accept, charged one transposition at that position;** mirrored under `(?r)`.
+  Pros: the half-typed "tec" stays open, as "tecso" deserves. The count is the open path's errors
+  and within every limit, the rule `GUIDE.md` already states for fuzzy partials. It is how
+  upstream charges a deletion, substitution or insertion at the edge.
+  Cons: the count names a swap whose second half has not arrived; if the text goes on
+  differently, the full match may be explained otherwise. Upstream's insertion row has the same
+  property.
+- **B. Refuse.** "tec" gets only the empty partial (3,3), the answer for a contradicted entry,
+  though "tecso" matches. The `partial-prefix-closure` invariant (`docs/ORACLE-INVARIANTS.md:265-268`)
+  asks only for "a match", which the empty partial satisfies, so the invariant would not catch
+  this; the search-box use would.
+- **C. Accept, charged nothing.** Cons: the half swap escapes the budget, so a partial can be
+  reported that no continuation completes within it: `{t<=1}` on "etc" spends its swap on "et",
+  then takes a free half swap at "c", although "etcso" needs two swaps. That breaks the rule that
+  a partial's path is within every limit.
 
-Under `{e<=1}` with the flag, the substitution arm already gives the partial, so the question
-only bites when substitutions are not allowed.
-
-**Recommendation: A**, with reverse search (`(?r)`) mirrored. It follows upstream's own rule for
-its edits at the edge: in the measured `(?:tesco){d<=1}` row above, the path deletes the "s",
-matches the "c", runs out of text, and is reported as a partial match charged one deletion. Confidence high for
-accepting, medium for how the count is reported.
+**Recommendation: A, with `(?r)` mirrored.** It is upstream's own rule for its edits at the edge
+(the measured rows) and the port's documented rule for partial counts, applied to one more kind.
+The cost is one extra case in the swap arm, reached only in partial mode when the text ends after
+the first character; tests pin `{t<=1}` on "tec" and its `(?r)` mirror. Confidence high.
 
 ### 10.10 Swaps across nodes
 
-**Context.** The first version allows swaps only inside one literal node. Example outside it:
-`(?:\d-\d){t<=1}` against "-12" swaps the class `\d` with the hyphen. Cases, in rising difficulty:
+**The question.** Between which two pattern items may a swap happen in the first version, given
+that the engine works one node at a time and the compiler can split one written word into several
+nodes?
 
-1. Single-character items in one sequence: classes, `.`, `\d`, properties, and literal characters
-   that sit in different nodes.
-2. The edge of a repeat: `a+b` against "aaba".
-3. A capture boundary: `(a)(b)` against "ba". Group 1 and group 2 would each have to take the
-   other's character, so their spans cross. There is no sensible answer.
-4. Alternation, calls, lookaround, and the edge of a fuzzy section (which section pays for a swap
-   whose halves sit in two of them?).
+**Context.** The engine matches a compiled list of nodes one at a time: a literal string, a
+character class, a repeat, a group edge, and so on. A swap needs two pattern items at once, the
+current one and the next. Inside one literal node both are at hand; at the edge of a node, the
+swap arm has to look into the next node.
 
-Upstream's engine works one node at a time; a swap needs the next item, which is known when the
-compiler builds the node list only in case 1 with nothing in between.
+Those edges fall where a user cannot see them. Under version 1, this library's default, a
+case-insensitive literal is split wherever its folded text contains a sequence that some character
+folds to: "st", "ss", "fi", "ff", "fl" and others (`Sequence.FlushCharacters` and
+`FixFullCasefold`, `Parsing/Nodes.cs:3217-3393`). Compiled 2026-11-06:
 
-Named lists count as literals for this purpose: upstream builds `\L<name>` as a branch of
-character sequences, one per word, longest first (`upstream/regex/_regex_core.py:4089-4100`). So
-the likely shape of name matching, `(?:\L<names>){t<=1}`, falls under "literals". Whether every
-such sequence ends up as one string node after optimisation was not traced here.
+| Pattern | Nodes |
+|---|---|
+| `(?i)tesco` | one `STRING_IGN` "tesco" |
+| `(?i)strasse` | `STRING_FLD` "st", `STRING_IGN` "ra", `STRING_FLD` "ss", `CHARACTER` "e" |
+| `(?i)first` | "fi", "r", "st" |
+| `(?V0i)strasse` | one `STRING_IGN` of 7 |
+
+So a swap confined to one node would answer `(?i)strasse` against "strsase" ("a" and "s"
+swapped) with one error under version 0 and two under version 1, and would treat "first" unlike
+"tesco". "Literal" has to mean the literal as written, across the nodes the compiler splits it
+into.
+
+Beyond literals, in rising difficulty:
+
+1. Single-character items next to each other: classes, `.`, `\d`, properties.
+   `(?:\d-\d){t<=1}` against "-12" swaps the class `\d` with the hyphen.
+2. A repeat edge: `ab+` against "ba".
+3. An alternation edge, `x(?:y|z)` against "yx"; or a swap inside one alternative, `(?:ab|cd)`
+   against "ba".
+4. A capture edge: `(a)(b)` against "ba". Group 1 would take the "b"'s place and group 2 the
+   "a"'s, so their spans would cross. There is no sensible answer for the captures.
+5. Calls, lookaround, and the edge of a fuzzy section (which section pays?).
+
+Named lists count as literals as written: upstream builds `\L<name>` as a branch of character
+sequences, one per word (`upstream/regex/_regex_core.py:4089-4100`), so `(?:\L<names>){t<=1}`
+swaps inside each word.
+
+**Measured** (upstream and this port have no swaps; "-" = not probed):
+
+| Pattern | Text | fuzzy-regex-rs `{t<=1}` | NR-grep `-k1t -x` | liblevenshtein, OSA |
+|---|---|---|---|---|
+| `te(sc)o` | tecso | 1 swap | - | - |
+| `tes(co)` | tecso | no swap (an insertion and a deletion) | - | - |
+| `(?:tes)co` | tecso | no swap (an insertion and a deletion) | - | - |
+| `\d-\d`, `[0-9]-[0-9]` | -12 | no swap | swap | - |
+| `[a-c][x-z]` | xa | no swap | swap | 1 |
+| `ab+` | ba | no swap | no; a match without `-x` | 1 |
+| `x(y\|z)` | yx | no swap | swap | 1 |
+| `(ab\|cd)` | ba | 1 swap | no | 1 |
+| `(abc\|tesco)` | tecso | no match (apparent defect) | no | 1 |
+| `(a)(b)` | ba | no swap | - | 1 (a distance; no group spans) |
+| `\w+ jumps over`, `[a-z]+ jumps` | ... jumsp over, ... jmups | no match under `{e<=1}` (apparent defect) | no; a match without `-x` | 1 (`[a-z]+jumps` against "foxjmups") |
+
+No two engines draw the line in the same place. fuzzy-regex-rs stops at every group edge, even a
+non-capturing one, and at every class. NR-grep crosses classes, `.` and alternation edges, but not
+within literal alternatives, and crosses repeat edges only in substring mode. liblevenshtein
+crosses everything, and can, because it reports a distance and no group spans. None crosses a
+capture edge while reporting captures.
 
 **Options.**
 
-- **A. Literals only, permanently.** Pros: smallest. Cons: `(?:\w+ jumps){t<=1}`-style patterns
-  never get swaps where a class meets a literal.
-- **B. Then case 1**, checked when the pattern is compiled: adjacent single-character items in one
-  sequence with no capture boundary, repeat edge, branch, lookaround, call or section edge between
-  them. Pros: covers classes, the next most common need. Cons: a second implementation step with
-  its own reference matcher.
-- **C. Everything.** Cons: case 3 has no defined answer; cases 2 and 4 multiply the engine work.
+- **A. One node only.** Pros: the smallest change; the swap arm never leaves its node.
+  Cons: answers depend on splits the user cannot see: `(?i)strasse` against "strsase" costs 1
+  under `(?V0i)` and 2 under the default, and `(?i)first` against "frist" ("i" and "r" swapped
+  across the "fi" | "r" seam) gets no swap while `(?i)tesco` against "tecso" does. The reference
+  matcher of section 8 would have to model the compiler's splits.
+- **B. The literal as written**, the scope 10.16 decided for the first version. A swap may join
+  two adjacent literal characters of one sequence, with nothing between them that matches,
+  captures, repeats or branches. Seams the compiler makes (the version 1 fold splits, the words of
+  a named list) do not count, and nor do parentheses that only group: `(?:tes)co` answers as
+  `tesco` does. Each swapped character is compared under its own node's rule (simple or full
+  folding, 10.11).
+  Pros: the answer depends only on the pattern as written, and is the same under `(?V0i)` and
+  `(?V1i)`; the reference matcher is plain OSA over the literal's text.
+  Cons: the compiler must mark a literal node whose next node continues the same written literal,
+  and at a node's last character the swap arm must read the next node's first character. More
+  work than A, but only at node edges.
+- **C. B plus single-character items** (case 1: classes, `.`, properties), as NR-grep does.
+  Pros: covers `\d-\d` and patterns where a class meets a literal.
+  Cons: a second implementation step. 10.16 decided it comes later, from the same general
+  definition of a swap.
+- **D. Everything but captures** (cases 1, 2, 3 and 5), as liblevenshtein does.
+  Cons: repeat and alternation edges multiply the work in an engine that holds one node at a time;
+  even NR-grep crosses repeat edges only in substring mode.
 
-**What other engines do.** Lucene, Elasticsearch and the distance libraries work on whole strings
-and have no structure to cross. fuzzy-regex-rs computes swaps in its literal automata
-(`damlev.rs`, `bitap.rs`), reached from the matcher through a bridge keyed by literal text
-(`src/engine/matcher.rs`, around 2855-2870); whether it swaps across classes or groups was not
-established.
+No option crosses a capture edge: the crossed spans have no answer.
 
-**Recommendation: A for the first version, B when a user asks, never case 3.** Confidence
-medium.
+**Recommendation: B for the first version, C later from the same definition, never case 4.**
+10.16 decided "literal-only", and the compiled splits show that only B makes "literal" mean what
+the user wrote: a word gets the same answer under either version and whatever letters it
+contains. A swap with both characters inside one capture group stays allowed (`te(sc)o`, as in
+fuzzy-regex-rs), because both land in the same group. Confidence high. The one number not yet
+known is the cost of the look-ahead at node edges; it exists only once the arm does, and the
+standard gate (BenchmarkDotNet fuzzy rows with the flag off against main, A-B-B-A) shows whether
+sections without swaps pay anything.
 
 ### 10.11 Case folding
 
-**Context.** Version 1 is this library's default, and under version 1 `IgnoreCase` brings full case
-folding with it: `RegexFlags.cs:185` maps `Version1` to `FullCase`, and a literal compiled with
-`FullCase | IgnoreCase` becomes a `STRING_FLD` node (`Parsing/Nodes.cs:2591`). Measured upstream:
-`regex.fullmatch(r"(?V1i)stra(?:ss)e", "straße")` matches (0,6), and the `(?V0i)` form answers
-`None`. So simple folding, one character to one, applies only under `(?V0i)`. The motivating
-example, `(?i)(?:tesco){e<=1}` against "TECSO", runs through the full-fold arm under the default
-version.
+**The question.** Under full case folding, where one character can fold to several (ß to "ss",
+ﬁ to "fi"), what counts as the two characters of a swap?
 
-That arm, `NextFuzzyMatchStringFld` (`Engine/Matcher.cs:12774`), works in folded positions: "every
-position this moves is a position in the folding of one subject character, not in the subject: one
-subject character can answer for three pattern characters, so an error inside a folding must not
-move `text_pos` at all" (its remarks, about `:12765-12770`). `:13460` is a different arm,
-`NextFuzzyMatchGroupFld`, for a backreference folded on both sides; it does not take literals.
+**Context.** Version 1 is this library's default (upstream's is version 0), and under version 1
+`(?i)` means full case folding. Measured: on this port `(?i)strasse` matches "straße" and
+`(?i)fin` matches "ﬁn"; upstream refuses both under its default and matches both under `(?V1i)`.
+For ordinary letters, folding maps one character to one, and a swap is two characters compared
+crosswise. The motivating example is that case: `(?i)tesco` against "TECSO" compiles to one
+`STRING_IGN` node (10.10), simple comparisons only.
 
-Full folding can map one character to several: "ß" folds to "ss". With pattern
-`(?i)(?:aß){t<=1}`, the text "ssa" is the two items in the opposite order (a swap of items, three
-characters), while "sas" would split the "ß" fold across the swap.
+The hard part is a character that folds to more than one: ß, the ligatures ﬀ, ﬁ, ﬂ, ﬃ, ﬄ, ﬅ, ﬆ,
+and a few others. Two definitions are possible.
+
+- **Folded units.** Compare the folded texts and swap two adjacent folded characters. This is how
+  upstream makes its own edits in a full-fold literal: one folded character per edit, so a
+  substitution can consume half of a subject "ß" (`NextFuzzyMatchStringFld`).
+- **Whole characters.** A swap exchanges two characters of the text, each matched whole against
+  the pattern characters its folding covers. This is the port's rule for its own edits since
+  ledger entries 49 and 52 ("a fuzzy edit applies to one subject character"), which added
+  whole-character substitutions and insertions beside upstream's folded ones and kept both, so no
+  match upstream finds is lost.
+
+They differ only where an expanding character is in the swapped pair:
+
+| Pattern | Text | Folded units | Whole characters | Today: upstream `(?V1i)`, `{e<=2}` |
+|---|---|---|---|---|
+| `(?i)strasse` | strsase | 1 | 1 | (2,0,0), measured under upstream's `(?i)` and on the port |
+| `(?i)straße` | strßae | 2 ("strasse" against "strssae") | 1 (ß and "a" exchanged) | (0,1,1) |
+| `(?i)strasse` | strßae | 2 | 1 (ß stands for "ss") | (0,1,1) |
+| `(?i)fin` | nﬁ | 2 | 1 | (0,1,1) |
+| `(?i)if` | ﬁ | 1 (the two halves of "fi" exchanged) | not a swap | (1,0,1) |
+
+The last column was measured on upstream on 2026-11-06 (the first row on the port too); the port
+was not run on the other four, where its whole-character edits could explain them differently.
+The last row is where the definitions disagree in kind: is "ﬁ" for "if" a swap? Folded units say
+yes; whole characters say the text has one character, not two in the wrong order.
+
+**What others do.** fuzzy-regex-rs (measured) folds one character to one only: `(?i)strasse`
+refuses "straße", `(?i)fin` refuses "ﬁn", and it treats ß as one character, so `(?i)straße`
+against "strßae" is one swap; the Kelvin sign swaps like a "k". FREJ (`Character.toUpperCase`)
+and fuzzy-aho-corasick (lower case per grapheme) fold one to one too (read from source). NR-grep's
+`-i` was measured on ASCII only. No engine with swaps was found that does full folding, so none
+has had to answer this.
+
+**Implementation cost** (code trace, `.scratch/research/AGENT-FINDINGS.md`, task 2). In the
+simple-folding arms (`STRING_IGN`, `CHARACTER_IGN`) a swap is two crossed `SameCharIgn` checks:
+trivial. In `STRING_FLD`, folded-unit swaps need the folding of the next subject character as
+well as the current one, and state for a half-used character: medium. Whole-character swaps need
+variable-length comparisons at the start of a folding on both sides, the work of ledger entries
+49 and 52 again: hard.
 
 **Options.**
 
-- **A. Swaps in the `STRING_FLD` arm from the first version, only when each of the two subject
-  characters folds to exactly one character** (and the two pattern positions are whole
-  characters, not the inside of a multi-character fold). Otherwise the swap arm is not tried; the
-  other edits still apply.
-  Pros: covers `(?i)` under the default version, which is where the motivating case lives; the
-  condition makes the swap the same per-character comparison as under `(?V0i)`. Cons: two arms to
-  change (`STRING_IGN` for version 0 and `STRING_FLD`), and a stated gap for "ß"-like characters.
-- **B. Swaps of items**, each item matched with its own fold length: "ssa" is a swap, "sas" is not.
-  Pros: the complete definition. Cons: in the full-fold arm a pattern item can be part of a
-  subject character's folding, so "item" needs defining in folded positions; more work and risk.
-- **C. Swaps of folded characters:** "sas" is also a swap. Cons: a swap inside one pattern item.
-- **D. Simple folding only (`STRING_IGN`), no swaps in `STRING_FLD`.** Cons: no swaps for any
-  `(?i)` literal under the default version, the case the feature exists for.
+- **A. Single-unit pairs only.** Try a swap only when both swapped text characters fold to one
+  character each and both pattern positions are whole pattern characters that fold to one each.
+  Otherwise the swap arm is not tried and today's edits apply ("strßae" and "ﬁ" for "if" cost 2,
+  as now).
+  Pros: on every pair it accepts, both definitions agree, so a later move to either changes no
+  answer A gives; it can only lower some counts from 2 to 1. It covers every word without ß or a
+  ligature, including the split ones (`(?i)strasse` against "strsase", across the seams, 10.10).
+  In `STRING_FLD` it adds one fold-length check of the next text character; the comparison is
+  then the same as in the simple arms.
+  Cons: a stated gap: a swap that involves ß or a ligature is not one.
+- **B. Folded units.** Pros: upstream's own model for edits in a full-fold literal; "ﬁ" for "if"
+  costs 1. Cons: "strßae" for "straße" stays 2, where a German typist would expect one swap;
+  medium cost.
+- **C. Whole characters.** Pros: the port's model since ledger entries 49 and 52; "strßae" and
+  "nﬁ" cost 1. Cons: hard; "ﬁ" for "if" is not a swap.
+- **D. Both**, as the port already does for substitutions and insertions. Pros: every row costs 1;
+  consistent with the port's existing edits. Cons: the cost of B and C together.
+- **E. No swaps in `STRING_FLD` at all.** Cons: version 1 splits literals into `STRING_FLD` pieces
+  at "st", "ss", "fi", "ff" and "fl", so every case-insensitive word containing one of them would
+  lose swaps inside those pieces, which a user cannot predict (10.10, option A's objection). Not a
+  candidate.
 
-**What other engines do.** Not established for any engine with swaps.
-
-**Recommendation: A in the first version, B later if asked for.** Confidence medium. What would
-settle the details: tracing how `NextFuzzyMatchStringFld` counts a substitution that lands inside
-a multi-character folding, and writing the swap rule to match it.
+**Recommendation: A in the first version; D if the gap is ever closed.** A gives exactly the
+answers on which every definition agrees, so it cannot turn out wrong whichever the owner prefers
+later, and it costs one lookup. D is the right target if a user meets the gap, because it repeats
+what ledger entries 49 and 52 did for the other kinds. Confidence high for A. Choosing between B,
+C and D is deferred rather than open: it needs to know how often an expanding character sits
+inside a swap in real text, which no corpus at hand records.
 
 ### 10.12 The prefilters
 
-**Context.** Several filters rest on one fact: an insertion, deletion or substitution damages at
-most one piece of the literal, so a text within `k` errors of it keeps one of `k + 1` pieces
-intact. A swap across a piece boundary damages two. Example: `(?:tesco){t<=1}` with k = 1 might
-split into "tes" and "co"; "tecso" changes the "s" in the first and the "c" in the second, so
-neither occurs, the filter finds no candidate, and a real match is missed.
+**The question.** How do the fuzzy literal prefilters stay sound once one swap can damage two
+pieces of a literal?
 
-`k` comes from `MostErrors` (`Engine/FuzzyLiteralFilter.cs:878-903`), which takes the tightest of
-three bounds: the total (`MaxErr`), the sum of the per-kind maxima, and the cost limit divided by
-the cheapest kind's cost. Each bound needs the swaps added, not just a fourth term in the loop.
-Example: `{2i+2d+2s+1t<=2}`. With `t` counted as a fourth kind, `MostErrors` gives
-2 / 1 = 2. But two swaps cost 2 and can damage four pieces, so the sound bound is 4. The rule:
+**Context.** Before running the full matcher, the engine looks for places where the fuzzy literal
+could match, and skips the rest. The piece filter rests on one fact: split the literal into
+`k + 1` pieces; an insertion, deletion or substitution touches at most one piece, so a text within
+`k` errors keeps at least one piece intact, and the filter searches for the pieces
+(`Engine/FuzzyLiteralFilter.cs:17-25`; Navarro 2001, section 8.2.3, p. 64). A swap of the last
+character of one piece with the first of the next touches two. Example: `(?:tesco){t<=1}` with
+k = 1 might split into "tes" and "co"; "tecso" changes the "s" of the first and the "c" of the
+second, neither piece occurs, and the filter discards a real match. Navarro gives two remedies on
+the same page: "split the pattern in 2k + 1 pieces", or "leave a hole of one character between
+each pair of pieces, so that the transposition cannot alter both".
+
+**Measured.** `.scratch/research/pieces.py`, exhaustive over every literal length from 6 to 14,
+k from 1 to 3, and every placement of k non-overlapping swaps:
+
+- with `k + 1` pieces, k swaps can destroy all of them, for every length and k: the filter as it
+  stands is unsound for swaps;
+- with `2k + 1` pieces at least one always survives (at worst 2k are destroyed);
+- with `k + 1` pieces and a one-character hole between neighbours, at most k are destroyed.
+
+The scans measure Levenshtein distance, in which a swap costs at most 2 (it is a deletion plus an
+insertion); Levenshtein ≤ 2 × OSA also held on 200,000 random pairs (RapidFuzz 3.14.6).
+
+`k` comes from `MostErrors` (`Engine/FuzzyLiteralFilter.cs:878-903`), the tightest of three
+bounds: the total (`MaxErr`), the sum of the per-kind maxima, and the cost limit divided by the
+cheapest kind's cost. Each would count a swap once; the sound bound counts it twice:
 k' = `MostErrors` + most swaps, where most swaps = min(`t` maximum, `e` maximum, cost limit / `t`
-cost).
+cost). Example: `{2i+2d+2s+1t<=2}` gives `MostErrors` = 2, but two swaps can damage four pieces,
+so k' = 4.
 
 **Everything that consumes `k`:**
 
-1. The piece filter itself (`FuzzyLiteralFilter.TryCreate`): `k' + 1` pieces. Pieces shorter than
-   `MinPieceLength` = 3 (`FuzzyLiteralFilter.cs:104`, `:267`) drop the filter to scan-only, so a
-   larger `k` pushes short literals out of piece filtering.
-2. The Myers scan, `LiteralScan.ForLiteral(walk, maxErrors)` (`:222`, `:650`). It measures
-   Levenshtein distance, and one swap is at most two Levenshtein edits, so passing `k'` (which
-   counts each swap once more) covers it.
-3. D145's partial prefilter, `PartialReachOf(walk, maxErrors)` (on `perf/phase11-integration`,
-   `FuzzyLiteralFilter.cs:294`): how far before the end of the text a partial match can start. A
-   swap adds no length, so a larger `k` only loosens it; it stays sound.
-4. Phase 11 item 8's required-literal screen, `FuzzyLiteralFilter.TryCreateRequired`
-   (uncommitted in worktree `.claude/worktrees/req`, branch `perf/item8-required-literal`, about
-   `:380-400`): a Myers scan for a literal that ends the section, with the same `k` (`:458`,
-   `:485`). It needs `k'` like item 2. Its soundness argument also assumes every edit near the
-   literal is one of the section's errors aligned with it; a swap between the literal's first
-   character and the item before it would break that, which is one more reason to keep swaps
-   inside literals (10.10).
+1. The piece filter, `FuzzyLiteralFilter.TryCreate`. Pieces shorter than `MinPieceLength` = 3
+   (`:104`, `:267`) drop the filter to scan-only, so a larger k pushes short literals out of piece
+   filtering.
+2. The Myers scan, `LiteralScan.ForLiteral(walk, maxErrors)` (`:222`, `:650`), which measures
+   Levenshtein distance: needs k'.
+3. D145's partial prefilter, `PartialReachOf(walk, maxErrors)` (merged to main 2026-11-06): how far
+   before the end of the text a partial match can start. A swap adds no length, so k' only
+   loosens it; it is sound either way.
+4. Phase 11 item 8's required-literal screen, `FuzzyLiteralFilter.TryCreateRequired` (committed on
+   `perf/item8-required-literal` at ee646911, not merged): a Myers scan of a literal that ends the
+   section. It needs k' like item 2. Under 10.10 B a swap can straddle the screened literal's first
+   character and the character before it, where the compiler split one written literal; that is at
+   most two Levenshtein edits on the screened literal, inside k', and the screen's soundness note
+   must say so.
 
-**Options** (the first two are Navarro 2001, section 8.2.3, p. 64 of the copy read):
+**What others do.** fuzzy-aho-corasick's bit-parallel prefilter charges a swap as 2
+(`src/search.rs:509-552`, read), which is option A. Which remedy NR-grep uses was not checked.
 
-- **A. Use `k'` everywhere `k` is used today.** Equivalent to Navarro's "2k + 1 pieces" when every
-  error could be a swap. Pros: one rule, a published proof, and the scans are covered by the same
-  number. Cons: shorter pieces and a weaker filter, for sections that allow swaps only.
-- **B. Leave a one-character hole between pieces**, "so that the transposition cannot alter
-  both". Pros: keeps the pieces almost as long. Cons: only fixes the piece filter (items 2 to 4
-  still need `k'`); a new proof.
-- **C. Withhold every filter when swaps are allowed.** Pros: trivially sound. Cons: the slowest.
+**Options.**
 
-**Recommendation: A,** with a witness test per filter that fails without it (rule 12), and B only
-if a benchmark shows the weaker piece filter matters. Confidence high on soundness; the speed
-cost is not measured.
+- **A. Use k' wherever k is used today.** Where every error may be a swap, this is Navarro's
+  2k + 1 pieces.
+  Pros: one number in one function, covering the piece filter and both scans; proved by the
+  exhaustive check; with swaps off, most swaps = 0 and every filter is unchanged.
+  Cons: sections that allow swaps get more, shorter pieces: with k = 1, three pieces of 3 need a
+  9-character literal where two pieces need 6, so more literals fall back to scan-only.
+- **B. One-character holes between `k + 1` pieces** for the piece filter, k' for the scans.
+  Pros: longer pieces: with k = 1, 7 characters give two pieces of 3 and a hole. Proved by the same
+  check.
+  Cons: a second piece layout, with its own window arithmetic and tests; the scans still need k'.
+- **C. Withhold every filter when swaps are allowed.** Pros: trivially sound. Cons: the slowest,
+  and the check shows it is unnecessary.
+
+**Recommendation: A,** with a witness test per filter that fails without the change (a swap
+straddling a piece seam; `VERIFICATION.md` rule 12). Soundness is settled: the exhaustive check
+shows the current filter fails and both remedies hold. A is one change and leaves patterns
+without swaps untouched by construction. B is a later optimisation, worth it only if a benchmark
+on swap-enabled patterns shows the shorter pieces cost something; that number cannot exist before
+the feature does. Confidence high.
 
 ### 10.13 `{t...}` is literal text today
 
 **Context.** A brace group that is neither a quantifier nor a valid constraint is literal text
 (section 6, corrected). Measured upstream: `(?:ab){t<=1}` matches "ab{t<=1}",
-`(?:ab){e<=1,t<=1}` matches "ab{e<=1,t<=1}", and `a{t}` matches "a{t}"; this port follows the same
-code path (not run). Once `t` is recognised, these become fuzzy constraints. So the decision of
+`(?:ab){e<=1,t<=1}` matches "ab{e<=1,t<=1}", and `a{t}` matches "a{t}". Measured on this port too:
+`(?:ab){t<=1}` matches "ab{t<=1}" and `a{t}` matches "a{t}". Once `t` is recognised, these become fuzzy constraints. So the decision of
 2026-11-05, "with neither, every pattern keeps today's and upstream's meaning", is not quite true
 for `t`.
 
@@ -893,39 +1120,59 @@ for `t`.
 - **C. Make `t` a parse error first, recognise it a release later.** Cons: still a change, made
   twice.
 
-How likely such a literal is was not measured; a search of public code for `{t<=` in regex
-patterns would settle it.
+A GitHub code search on 2026-11-06 found no regex pattern using such a brace group.
 
-**Recommendation: A**, with the release note. Confidence medium. **Owner:** choosing A amends the
-decision of 2026-11-05: the `DECISIONS.md` entry and section 1's third **Decided** bullet ("with
-neither, behaviour is exactly today's") would need the exception "except patterns that contain a
-literal brace group starting with `t`".
+**Decided 2026-11-06: A, shipped as a major version (2.0.0)**, with the change stated in the
+release notes. It amends the decision of 2026-11-05: the `DECISIONS.md` entry and section 1's
+third **Decided** bullet ("with neither, behaviour is exactly today's") need the exception "except
+patterns that contain a literal brace group starting with `t`".
 
 ### 10.14 Flag name, bit value, inline letter, counts and changes
 
-**Context and options.**
+**The question.** What is the option flag called, which bit does it take, does it get an inline
+letter, and how do the counts report swaps?
 
-- **Name.** `Transpositions` (Lucene's parameter and Elasticsearch's field use the word),
-  `TranspositionsAsOneError` (says the effect, but long), `DamerauEdits` (needs a definition to
-  read). Recommend `FuzzyRegexOptions.Transpositions`: the industry's word, and the same as the
-  new counts property.
-- **Bit.** `FuzzyRegexOptions` is an `int` enum whose values are upstream's flag values, the
-  highest `Posix = 0x10000`. Recommend a high bit such as `0x40000000`, which avoids the sign bit
-  and stays clear of anything upstream is likely to add, with a `DIVERGENCES.md` row.
-- **Inline letter.** Upstream's `T` is taken in the Python API: `T = TEMPLATE = 0x1  # Template
-  (present because re module has it)` (`upstream/regex/_regex_core.py:91`), a flag with no inline
-  form. Measured: `(?t)a` and `(?T)a` both raise "unknown extension at position 2". So `t` is free
-  inline today, but sits next to a name upstream already uses, and a letter could clash with a
-  later upstream one; `t` in braces already gives in-pattern control. Recommend none in the first
-  version.
-- **Counts and changes.** As section 6: keep the positional `(Substitutions, Insertions,
-  Deletions)`, add `int Transpositions { get; init; }`, include it in `Total`, and add
-  `FuzzyChanges.Transpositions` holding the subject index of the first swapped character. With
-  swaps off, `Transpositions` is 0 and `Total` is unchanged. fuzzy-regex-rs made the same choice:
-  `fuzzy_counts()` stays the upstream triple and swaps are read separately
-  (`src/api/match_result.rs:244-257`).
+**Context and evidence.**
 
-**Recommendation:** as above. Confidence high.
+- **Name.** The word others use is "transposition": Lucene's `transpositions` parameter,
+  Elasticsearch's `transpositions` and `fuzzy_transpositions`, liblevenshtein's
+  `Algorithm::Transposition`, uFuzzy's `intraTrn` (all read). The new counts property would carry
+  the same word.
+- **Bit.** `FuzzyRegexOptions` is an `int` enum whose values are upstream's flag values
+  (`FuzzyRegexOptions.cs:7-10`). The highest bit in use is `0x10000` (`Posix`), in upstream
+  (`upstream/regex/_regex_core.py:74-91`) and in the port, both checked 2026-11-06. `0x40000000`
+  is free in both and stays below the sign bit.
+- **Inline letter.** Upstream's Python API already has `T = TEMPLATE = 0x1`, a flag with no inline
+  form, and `D = DEBUG = 0x200`. Measured: `(?t)a` and `(?T)a` both raise "unknown extension at
+  position 2", so `t` is free inline today, but a letter could clash with a later upstream one.
+  In-pattern control already exists: `t` inside braces, the letter NR-grep (`-k1t`) and
+  fuzzy-regex-rs (`{t<=1}`) also use.
+- **Counts.** `FuzzyCounts` is a positional record struct `(Substitutions, Insertions,
+  Deletions)` (`FuzzyCounts.cs:28-32`), and the README deconstructs it as `(int s, int i, int d)`.
+  fuzzy-regex-rs kept its triple too: measured, `fuzzy_counts()` reports a one-swap match as
+  (0,0,0), and the swap appears only in `edits().swaps` and the total.
+
+**Options.**
+
+- **Name:** `Transpositions`; `TranspositionsAsOneError` (says the effect, but long);
+  `DamerauEdits` (needs a definition to read).
+- **Bit:** `0x40000000`, with a `DIVERGENCES.md` row; or the next bit after upstream's,
+  `0x20000`, which collides as soon as upstream adds a flag.
+- **Inline letter:** none in the first version; or `(?t)`, convenient, but a letter upstream may
+  later take, next to its `T`.
+- **Counts, A:** keep the positional triple and add a non-positional `int Transpositions { get;
+  init; }`, included in `Total`, plus `FuzzyChanges.Transpositions` holding the subject index of
+  the first swapped character. Pros: every existing deconstruction compiles and means the same;
+  with swaps off, `Transpositions` is 0 and `Total` is unchanged. Cons: as in fuzzy-regex-rs, a
+  caller who deconstructs `(s, i, d)` sees (0,0,0) for a one-swap match whose `Total` is 1, so the
+  XML docs and the README example must say so.
+- **Counts, B:** a fourth positional member. 2.0.0 (10.13) permits a breaking change, but every
+  caller who deconstructs the triple would have to change code for a feature most will not use.
+
+**Recommendation:** `FuzzyRegexOptions.Transpositions = 0x40000000`, no inline letter, counts A.
+The bit check settles the value, the measured `(?t)` error shows a letter is not needed for
+in-pattern control, and fuzzy-regex-rs shows the counts shape in use, including the trap the
+docs must cover. Confidence high.
 
 ### 10.15 Comment on upstream issue #400?
 
@@ -940,16 +1187,17 @@ the owner approves any text before it is filed.
   five years without a reply suggests no effect; the feature is not built.
 - **C. Comment when it ships, pointing to a working design.**
 
-Two engines using `t` (fuzzy-regex-rs and this one) makes `t` the obvious letter if upstream ever
-adds it.
+fuzzy-regex-rs uses `t` in braces and NR-grep uses it in `-k1t`; with this port that makes `t` the
+obvious letter if upstream ever adds the kind.
 
-**Recommendation: A, with C open.** Confidence medium. **Owner:** a policy call.
+**Decided 2026-11-06: A**; reconsider commenting (C) when 2.0.0 ships.
 
 ### 10.16 Build it, or document the workaround?
 
 **Evidence.** One user so far (section 2). Upstream #400: 3 thumbs-up and no comments in over five
-years. fuzzy-regex-rs, the one regex engine with swaps: 6 GitHub stars, created 2026-01-04 (GitHub
-API, 2026-11-06). Lucene and Elasticsearch turn swaps on by default, so their users get them
+years. fuzzy-regex-rs, the regex engine closest to this one with swaps: 6 GitHub stars, created
+2026-01-04 (GitHub API, 2026-11-06). The other pattern matchers with swaps (section 4) are NR-grep
+(2001), liblevenshtein (repository created 2025-10-26, 4 stars) and smaller tools. Lucene and Elasticsearch turn swaps on by default, so their users get them
 without asking, which says nothing either way about demand in regex form. The workaround of
 section 9 was run on upstream and works, but reports the swap as no error and needs one list entry
 per adjacent pair.
@@ -962,44 +1210,51 @@ per adjacent pair.
   the first syntax upstream lacks.
 - **C. Build beyond literals.** Cons: 10.10's work on top of B.
 
-**Recommendation: A now whatever else happens; B if the user's case needs the counts or a second
-request arrives.** Confidence medium. **Owner:** a priority call.
+**Decided 2026-11-06: B**, after 1.3, with the workaround documented now (A) as well. Keep tier 1
+(adjacent single-character items) cheap to add later: one general definition of a swap, and a
+reference matcher built on it from the start.
 
 ### 10.17 Where the fourth kind lives in a `FUZZY` node's values
 
+**The question.** Where does a compiled `FUZZY` node keep the minimum, maximum and cost of `t`?
+
 **Context.** A `FUZZY` node carries its constraints as packed blocks of four values, one slot per
 kind in the order Sub = 0, Ins = 1, Del = 2, then Err = 3: minima from `MinBase` = 1, maxima from
-`MaxBase` = 5, costs from `CostBase` = 9 (`Engine/Node.cs:457-531`, a port of upstream's
+`MaxBase` = 5, costs from `CostBase` = 9 (`Engine/Node.cs`, `FuzzyValue`, a port of upstream's
 `RE_FUZZY_VAL_*` defines, `_regex.c` lines 176-200). `Count` = 3 kinds are counted separately.
 Slot 3 of each block is `Err`, so there is no free slot for a fourth kind. The compile-parity
-corpus compares these values with upstream's compiled code.
+corpus (`tests/FuzzyRegex.Tests/Gaps/CompileParity/`) compares these values with upstream's
+compiled code. `FuzzyValue.` appears 271 times, 222 of them in `Matcher.cs` (counted 2026-11-06).
+
+**What others do.** Not comparable: fuzzy-regex-rs keeps its limits in a struct (`src/types.rs`),
+and liblevenshtein chooses the algorithm for the whole automaton (`Algorithm::Transposition`).
+Neither has upstream's packed values.
 
 **Options.**
 
 - **A. Renumber: four kinds per block, Err at 4, bases shifted.**
   Pros: one layout; every loop over `FuzzyValue.Count` picks up the new kind.
   Cons: every fuzzy pattern compiles to different values from upstream, so the compile-parity
-  corpus breaks for all fuzzy rows, flag or not; 271 uses of `FuzzyValue.` to review (222 in
-  `Matcher.cs`, counted 2026-11-06).
-- **B. A separate tail block after the existing values, emitted only when `t` or the flag is in
-  use** (minimum, maximum and cost of `t`).
+  corpus breaks for every fuzzy row, flag or not; every loop over the kinds runs four times on
+  every fuzzy match, swaps or not; 271 uses to review.
+- **B. A separate block for `t`, present only when `t` or the flag is in use** (its minimum,
+  maximum and cost), after the existing values or in fields beside them.
   Pros: without `t` and the flag, every node's values are byte-identical to today's, so the
-  compile-parity corpus and the flag-off guarantee hold by construction; the fast path for
-  ordinary fuzzy patterns is untouched.
-  Cons: two layouts; every reader of the values must ask whether the tail exists; loops over the
-  kinds must handle the fourth separately; and the new kind cannot simply be `FuzzyValue` 3,
-  which is `Err`.
+  compile-parity corpus and the flag-off guarantee hold by construction, and the path for ordinary
+  fuzzy patterns keeps its three-kind loops.
+  Cons: two layouts; code that reads the values must know whether the block exists; the new kind
+  cannot simply be `FuzzyValue` 3, which is `Err`.
 
-Either way, the per-match counts are a separate matter: `FuzzyCountBuffer` is sized by
-`FuzzyValue.Count` (`Engine/InlineBuffers.cs:42-43`), so the match state needs a fourth count or a
-separate field, which is an allocation and speed check on every fuzzy match.
+Either way, the per-match counts need a fourth count or a separate field: `FuzzyCountBuffer` is
+sized by `FuzzyValue.Count` (`Engine/InlineBuffers.cs:42-43`), so the match state grows, which the
+allocation check of every perf change covers.
 
-**What other engines do.** Not applicable: fuzzy-regex-rs keeps its limits in a struct
-(`src/types.rs`), not in upstream's packed values.
-
-**Recommendation: B.** It keeps this port's compatibility guarantee mechanical: the flag-off
-build compiles the same values as today. Confidence medium: B's extra branches in the hot path
-must be measured, and if they cost more than A's renumbering, A becomes the better trade.
+**Recommendation: B.** A's costs are certain and fall on every fuzzy pattern; B's fall only on
+patterns that use swaps, apart from one check for the block's presence. That check is the one
+number not yet known, and it exists only once the code does. The build-time gate settles it: the
+BenchmarkDotNet fuzzy rows with the flag off against main (A-B-B-A) and the allocation check must
+show no change beyond noise; if they do, the check moves to section entry, where it runs once per
+section, not per item. Confidence high.
 
 ## 11. Documents to update when it ships
 
