@@ -39,5 +39,5 @@ measurement, WPR profiles and benchmarks.
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-**Next action:** owner: resume the transpositions decisions at 10.5/10.6 (answers so far at the top of
-section 10 of `2026-11-05-transpositions-design.md`). Then item 8 gates (quiet hit-row timing, oracle, review), D29.
+**Next action:** transpositions section 10 rewrite (subagent) from `.scratch/research/EVIDENCE.md` and
+`AGENT-FINDINGS.md`, blind review, then resume owner questions at 10.8. Then item 8 gates, D29.
