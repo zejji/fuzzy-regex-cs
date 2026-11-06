@@ -34,8 +34,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Machine free for timing to 07:40 (owner 2026-11-05); AC sleep off. BDN night 2 done 03:22, CPU cap restored.
-- Item 11 experiment: worktree `p11-myers` (env FUZZYREGEX_SCAN_MIN, never to be committed), harness `.scratch/p11-myers/`.
+- AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
