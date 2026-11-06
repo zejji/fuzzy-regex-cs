@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-06 05:45 by Claude Code (item 8 profiled; required-literal screen proposed).
+**Updated:** 2026-11-06 06:50 by Claude Code (item 8 screen on its branch; transpositions decisions researched and reviewed).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -18,7 +18,7 @@ measurement, WPR profiles and benchmarks.
 | 5 | D144 filter on non-ASCII text | `perf/d144-filter-ascii` 717b174f | green, blind review clean | merge via #7 |
 | 6 | D145 fuzzy partial prefilter | `perf/d145-partial-filter` eb555b33 | green, proof + review clean | merge via #7; add a BDN fuzzy partial row |
 | 7 | Integration to main (owner approved) | `perf/phase11-integration` 2c45e127, worktree `p11` | all gates green: ratchet (10,246), BDN 0.959 vs main, nothing slower (`bench/baselines/.../2026-11-06-phase11-integration-vs-main.md`), oracle 3 seeds (only D151-D153, identical on main) | owner: merge to main and push |
-| 8 | Grouped fuzzy repeats `(?:(\w+) jumps over){e<=2}` | - | profiled (`2026-11-06-grouped-fuzzy-repeats-profile.md`) | build the required-literal screen, test-first |
+| 8 | Grouped fuzzy repeats (D154) | `perf/item8-required-literal`, worktree `req` | screen built, ratchet GREEN; near miss 310,886 to 204 ns; hit-row cost not settled (noisy rounds) | quiet A-B-B-A of the hit rows; oracle 3 seeds; blind review; merge into p11 |
 | 9 | D29 + D135 compile allocation | D135 `perf/d135-open-group-counts` 4b0bd431 | D135 merged into p11 2c45e127 (ratchet GREEN, oracle: known rows only) | D29 |
 | 10 | `(?b)` 544 B per call | - | not started | |
 | 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
@@ -46,4 +46,5 @@ Waiting on the owner: item 7's merge to main and push (all gates green).
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-**Next action:** item 8: build the required-literal screen (design in the profile note), test-first; D29.
+**Next action:** owner: transpositions decisions (`2026-11-05-transpositions-design.md` section 10; 10.13, 10.15,
+10.16 need the owner). Then item 8 gates (quiet hit-row timing, oracle, review), D29.
