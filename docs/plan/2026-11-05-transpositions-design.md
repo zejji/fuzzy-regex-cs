@@ -312,6 +312,27 @@ Worth documenting the first in `GUIDE.md` whether or not the feature is built.
 
 ## 10. Questions for the owner
 
+**Owner's answers so far (2026-11-06, interactive pass paused at 10.5):**
+- 10.16: **B** - build the literal-only version after 1.3, and document the named-list workaround now.
+  Keep tier 1 (adjacent single-character items such as `\d`, `[a-z]`, `.`) cheap to add later: one
+  general definition of a swap and a reference matcher built on it from day one.
+- 10.13: **A with a major version** - always recognise `t`; transpositions ship as 2.0.0, the one
+  incompatibility (`{t...}` brace groups were literal text) stated in the release notes. A GitHub code
+  search on 2026-11-06 found no regex pattern using such a brace group.
+- 10.15: **A** - no comment on #400 now; reconsider commenting when 2.0.0 ships.
+- 10.1: **A** (OSA). 10.2: **No** (equal characters never count). 10.3: **A** (`t` follows the same
+  zeroing rule as `i`, `d`, `s`; with nothing named, `t` only under the flag). 10.4: **A**.
+- 10.5 and 10.6 open; to be decided together. Measured 2026-11-06 (fuzzy-regex-rs v0.2.0 built in the
+  official `rust:1.88-slim` container, probe `.scratch/frr-probe/`): its default behaves like
+  upstream's `(?b)` (fewest edits anywhere: `(?:abc){e<=1}` in "xbc abc" gives (4,7) exact, upstream
+  plain (0,3)), not "leftmost then fewest" as read from its source; swaps are on inside `e`
+  (`(?:tesco){e<=1}` matches "tecso"); `fuzzy_counts()` omits swaps ((0,0,0), total 1); ties differ
+  from upstream `(?b)` ("abxc": insertion (0,4) against substitution (0,3)); its `(?e)` answers like
+  upstream plain; no swap across a class and a literal (`\d-\d` in "-12" gives "-1" with a deletion).
+  Section 4 and 10.5's fuzzy-regex-rs lines need correcting accordingly. NR-grep (Navarro) also
+  supports swaps, across pattern items (`.scratch/transposition-engine-survey.md`); section 4 to
+  correct.
+
 Rewritten 2026-11-06, then revised the same day after a blind review and after reading the
 primary papers (Damerau 1964, Lowrance & Wagner 1975, Wagner & Fischer 1974, Pollock & Zamora
 1984; PDFs in `.scratch/papers/`). Each question gives the context with an example, the options with their
