@@ -297,6 +297,8 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<CharactersWalked>k__BackingField",
                 "WorkCounter.<CutBodyKeysPeak>k__BackingField",
                 "WorkCounter.<CutBodyWritesSkipped>k__BackingField",
+                "WorkCounter.<FilterNoMatchTails>k__BackingField",
+                "WorkCounter.<FilterStartsHeldBack>k__BackingField",
                 "WorkCounter.<FramesCut>k__BackingField",
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
@@ -1018,7 +1020,8 @@ public sealed class ThreadSafetyTests
             // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
             // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
             // pattern compiles; one byte holds the two, and (D10) Node.SavesOnlyForCalls, set by
-            // NodeCompiler.BuildLookaround and read only by the oracle.
+            // NodeCompiler.BuildLookaround and read only by the oracle; and (D143)
+            // Node.HasPlainErrorBudget, set by NodeCompiler.BuildFuzzy.
             "Node._flags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
@@ -1027,6 +1030,8 @@ public sealed class ThreadSafetyTests
             "Node.EnclosingSection",
             // D124: written by Compile once the lookaround bodies are set (SetVacuousDecisionLookarounds).
             "Node.HasVacuousDecision",
+            // D141: written by Matcher.FillAsciiAnswers, the last pass of Compile.
+            "Node.<AsciiAnswers>k__BackingField",
             "Node.Match",
             "Node.Op",
             "Node.Status",

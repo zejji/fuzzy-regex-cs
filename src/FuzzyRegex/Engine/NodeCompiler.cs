@@ -277,7 +277,6 @@ internal static class NodeCompiler
             Status = flags << NodeStatus.Shift,
             Step = step,
             Encoding = encoding,
-            AsciiAnswers = Matcher.HasAsciiAnswers(op, encoding) ? new ulong[2] : null,
         };
 
         // Record the new node.
@@ -582,6 +581,9 @@ internal static class NodeCompiler
         startNode.Values[FuzzyValue.InsCost] = args.At(11);
         startNode.Values[FuzzyValue.SubCost] = args.At(12);
         startNode.Values[FuzzyValue.MaxCost] = args.At(13);
+
+        // NOT UPSTREAM (D143): see Matcher.HasPlainErrorBudget.
+        startNode.HasPlainErrorBudget = Matcher.HasPlainErrorBudget(startNode.Values);
 
         // THIS PORT'S OWN LINE, for 'Matcher.DoBestFuzzyMatch'. Upstream has no equivalent because
         // nothing upstream ranks by cost. A section whose three costs are equal prices every error

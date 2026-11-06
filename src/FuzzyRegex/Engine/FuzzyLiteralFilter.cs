@@ -35,19 +35,57 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// bound leaves, and the attempts are independent because the pattern holds nothing but the
 /// literal - no verb, no group, no anchor. Reverse, <c>BESTMATCH</c> and <c>ENHANCEMATCH</c> choose
 /// among matches, and every candidate holds an untouched piece, so they keep the filter. A partial
-/// match does not: it can be a prefix of the literal holding no whole piece, so
-/// <c>Matcher.BasicMatch</c> withholds the filter from partial searches.
+/// match does not: it can be a prefix of the literal holding no whole piece. But it runs out at the
+/// end of the text, so it starts within <see cref="PartialReach"/> units of it, and a forward
+/// partial search starts each attempt at the earlier of the filter's answer and that bound (D145,
+/// <c>Matcher.BasicMatchCore</c>). A reverse partial search does without the filter.
 /// </para>
 /// <para>
-/// <b>ASCII only, on both sides.</b> Case-insensitive matching pairs some ASCII letters with
-/// characters that are not ASCII - <c>k</c> with KELVIN SIGN U+212A, <c>s</c> with LONG S U+017F,
-/// and under full case folding <c>ss</c> with U+00DF and <c>fi</c> with U+FB01 - and an ordinal
-/// case-insensitive search sees none of those. Between two ASCII strings it is exact: every fold
-/// the engine applies to an ASCII letter lands on the same letter or its other case, and a Turkic
-/// dotless or dotted I only narrows what matches. So the literal must be ASCII, and every stretch of
-/// subject the filter searches is checked for ASCII first; the first non-ASCII character switches
-/// the filter off for the rest of that search. ASCII also makes code units and characters the same
-/// count, so the offsets need no walk.
+/// <b>ASCII only, on both sides, when case is ignored.</b> Case-insensitive matching pairs some
+/// ASCII letters with characters that are not ASCII - <c>k</c> with KELVIN SIGN U+212A, <c>s</c>
+/// with LONG S U+017F, and under full case folding <c>ss</c> with U+00DF and <c>fi</c> with U+FB01 -
+/// and an ordinal case-insensitive search sees none of those. Between two ASCII strings it is exact:
+/// every fold the engine applies to an ASCII letter lands on the same letter or its other case, and
+/// a Turkic dotless or dotted I only narrows what matches. So the literal must be ASCII, and every
+/// stretch of subject a case-insensitive filter searches is checked for ASCII first; the first
+/// non-ASCII character switches the filter off for the rest of that search. ASCII also makes code
+/// units and characters the same count, so the offsets need no walk.
+/// </para>
+/// <para>
+/// <b>D144: an ordinal filter reads any subject.</b> NOT UPSTREAM, as the whole filter is. When no
+/// node ignores case and every piece is ASCII (<see cref="_anyEncoding"/>), the subject's encoding
+/// matters to one thing only, the start bound, and the full ASCII pass is skipped:
+/// </para>
+/// <list type="number">
+/// <item><description>
+/// The engine compares a case-sensitive value with the text by equality (<c>Matcher.SameChar</c>),
+/// one whole character at a time, a surrogate pair decoded to one (<c>MatchState.CharAt</c>). An
+/// ASCII value equals only that ASCII unit, and an ASCII unit is never half of a pair, so an
+/// untouched piece in a match is exactly an ordinal occurrence of it in the code units. The
+/// one-edit-one-piece argument counts the literal's characters, not the text's, so a subject holding
+/// no piece holds no match whatever else it holds, forwards and in reverse.
+/// </description></item>
+/// <item><description>
+/// The bound does depend on the text. A match starting at <c>p</c> whose untouched piece <c>j</c>
+/// stands at <c>q</c> reads, before it, the literal's <c>offset(j)</c> characters less deletions
+/// plus insertions: at most <c>offset(j) + k</c> characters. One character is one unit except a
+/// high surrogate followed by a low one (<c>MatchState.NextPos</c>); an exact ASCII value reads one
+/// unit, a substitution or an insertion at most two. So <c>p &gt;= q - offset(j) - 2k</c> always.
+/// </description></item>
+/// <item><description>
+/// The search finds the first occurrence <c>f</c> from the query position, so <c>q &gt;= f</c>, and
+/// <c>p &gt;= f - offset(j) - 2k</c> always. If <c>[f - offset(j) - k, f)</c> holds no surrogate,
+/// <c>p &gt;= f - offset(j) - k</c>, the bound for ASCII text: otherwise <c>[p, q)</c> would hold
+/// those <c>offset(j) + k</c> units as as many characters, and at least one more character in front
+/// of them. So that window is checked, cut to the query position; a surrogate there, paired or not,
+/// widens the bound by <c>k</c> and does not switch the filter off.
+/// </description></item>
+/// </list>
+/// <para>
+/// A case-insensitive filter, one with a piece that is not ASCII (a lone character no ASCII
+/// character equals, below), and the bit-parallel scan (<see cref="LiteralScan"/>, whose table is
+/// ASCII and whose lengths are code units) keep the full ASCII checks. Witnesses:
+/// <c>FuzzyLiteralFilterEncodingTests</c>.
 /// </para>
 /// <para>
 /// <b>One exception: a lone character no ASCII character equals.</b> A fuzzy full-folded run holding
@@ -67,8 +105,8 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// literal ends, then the leftmost place one starts. Where the pieces would be shorter than
 /// <see cref="MinPieceLength"/> it is the whole filter; otherwise it reads only a window after each
 /// piece answer, from a scan's second query on (<see cref="NextStart"/>). The argument is the same as the pieces': every match is within <c>k</c> edits, so a
-/// position no such stretch starts at holds none. Partial matching is refused for the same reason
-/// as the pieces. A batch of queries that saves less than it reads pauses the scan for a while
+/// position no such stretch starts at holds none. A partial match is let through by the same bound
+/// as for the pieces. A batch of queries that saves less than it reads pauses the scan for a while
 /// (<see cref="ScanMemory.CountScan"/>). Design and evidence:
 /// <c>docs/plan/2026-10-13-fuzzy-literal-bitparallel-design.md</c>.
 /// </para>
@@ -148,8 +186,16 @@ internal sealed class FuzzyLiteralFilter
         _comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         Reverse = reverse;
         _asciiPiece = [.. pieces.Select(static piece => Ascii.IsValid(piece))];
+        _anyEncoding = !ignoreCase && Array.TrueForAll(_asciiPiece, static ascii => ascii);
         _scan = scan;
     }
+
+    /// <summary>
+    /// D144: whether the pieces' answers hold over any subject - no node ignores case and every
+    /// piece is ASCII - so they need no ASCII pass, only a surrogate check near a found piece. See
+    /// the class remarks.
+    /// </summary>
+    private readonly bool _anyEncoding;
 
     /// <summary>
     /// The literal as a bit-parallel scan (C3), or <see langword="null"/> when the literal does not
@@ -186,6 +232,83 @@ internal sealed class FuzzyLiteralFilter
     // the mirror is the upgrade when a long reverse fuzzy search is measured.
     internal bool Reverse { get; }
 
+    /// <summary>
+    /// D145: how many code units of subject a forward attempt can read before it runs out at the
+    /// end of the text, so that a partial match starts no earlier than <c>TextEnd - PartialReach</c>.
+    /// <c>w + 2k</c>, where <c>w</c> is the most any literal weighs, counting an ASCII value as one
+    /// and any other value as two, and <c>k</c> is <see cref="MaxErrors"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An attempt reads the subject three ways. A substitution reads one character, two units at
+    /// most, in place of at least one value. An insertion reads one character and no value; a
+    /// deletion reads nothing. A character read without an error is matched against values that
+    /// weigh at least its length: a character of the Basic Multilingual Plane is one unit and
+    /// weighs at least one value; an astral character, two units, either equals a value ignoring
+    /// case, which is then not ASCII (U+1DF95 equals <c>ß</c> in the Unicode 18 tables), or folds to
+    /// two values or more (U+1DF95 folds to <c>ss</c>) or to one that is not ASCII. No value is
+    /// astral (<see cref="LiteralWalk"/>), and the table facts are checked for every astral
+    /// character by <c>FuzzyLiteralPartialFilterTests.An_astral_character_read_without_an_error_weighs_two_values</c>.
+    /// A partial match has used at most one literal's values and made at most <c>k</c>
+    /// substitutions and insertions together (<see cref="MostErrors"/>), so it read at most
+    /// <c>w + 2k</c> units.
+    /// </para>
+    /// <para>
+    /// So a forward partial search may start every attempt at the earlier of the filter's answer
+    /// and <c>TextEnd - PartialReach</c>: no complete match starts before the first, and no partial
+    /// one before the second (<c>Matcher.BasicMatchCore</c>). <c>Matcher.BasicMatch</c> asserts the
+    /// second on every partial answer.
+    /// </para>
+    /// </remarks>
+    internal int PartialReach { get; private init; }
+
+    /// <summary>D145 A6: whether every literal has more units than <paramref name="maxErrors"/>.</summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>.</param>
+    /// <returns>Whether no literal can be deleted whole.</returns>
+    private static bool EveryLiteralOutlastsItsErrors(LiteralWalk walk, long maxErrors)
+    {
+        foreach (LiteralPath literal in walk.Literals)
+        {
+            long units = 0;
+            foreach (bool start in literal.UnitStarts)
+            {
+                units += start ? 1 : 0;
+            }
+
+            if (units <= maxErrors)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="PartialReach"/> for a walk, saturating at <see cref="int.MaxValue"/>.
+    /// </summary>
+    /// <param name="walk">The literals.</param>
+    /// <param name="maxErrors"><c>k</c>, at least 0.</param>
+    /// <returns><c>w + 2k</c>.</returns>
+    private static int PartialReachOf(LiteralWalk walk, long maxErrors)
+    {
+        // Loops, not LINQ: compiling '(?:needle){e<=1}' is pinned to its bytes (AllocationTests).
+        long heaviest = 0;
+        foreach (LiteralPath literal in walk.Literals)
+        {
+            long weight = 0;
+            foreach (uint value in literal.Values)
+            {
+                weight += value <= 0x7F ? 1 : 2;
+            }
+
+            heaviest = Math.Max(heaviest, weight);
+        }
+
+        return (int)Math.Min(int.MaxValue, heaviest + (2 * maxErrors));
+    }
+
     private readonly StringComparison _comparison;
 
     /// <summary>
@@ -220,15 +343,31 @@ internal sealed class FuzzyLiteralFilter
         // C3: the scan stands alone where the pieces would be too short, and checks the pieces'
         // hits where they are not. Either alone is a filter; neither is none.
         LiteralScan? scan = LiteralScan.ForLiteral(walk, maxErrors);
+
+        // D145 A6: no filtered pattern matches empty, so a partial search's scan never meets an
+        // empty match and its must-advance rule. Each deletion removes one unit, and every literal
+        // has more than k units: the pieces need k + 1 of them (Cut, 'units.Count < pieceCount'),
+        // and the scan alone needs k < m single-value units (LiteralScan.ForLiteral). Checked
+        // below for the literals the filter is built from; Debug only, as Debug.Assert's argument.
         (string[] Pieces, int[] Offsets)? cut = Cut(walk, maxErrors);
+        System.Diagnostics.Debug.Assert(
+            (cut is null && scan is null) || EveryLiteralOutlastsItsErrors(walk, maxErrors),
+            "D145 A6: every literal of a filtered pattern has more units than errors, so it cannot match empty"
+        );
         if (cut is not { } found)
         {
             return scan is null
                 ? null
-                : new FuzzyLiteralFilter([], [], (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+                : new FuzzyLiteralFilter([], [], (int)maxErrors, walk.IgnoreCase, isReverse, scan)
+                {
+                    PartialReach = PartialReachOf(walk, maxErrors),
+                };
         }
 
-        return new FuzzyLiteralFilter(found.Pieces, found.Offsets, (int)maxErrors, walk.IgnoreCase, isReverse, scan);
+        return new FuzzyLiteralFilter(found.Pieces, found.Offsets, (int)maxErrors, walk.IgnoreCase, isReverse, scan)
+        {
+            PartialReach = PartialReachOf(walk, maxErrors),
+        };
     }
 
     /// <summary>
@@ -905,10 +1044,11 @@ internal sealed class FuzzyLiteralFilter
     /// <summary>
     /// The earliest position at or after <paramref name="textPos"/> where a forward match could
     /// start, or <see cref="NoMatch"/> when none can, or <see cref="CannotTell"/> when the stretch
-    /// this call had to search is not all ASCII, or <see cref="Cancelled"/> when the scan found the
-    /// search's budget spent. While the scan is armed the answer depends only on the subject and the
-    /// two positions; <paramref name="memory"/> only saves searching again. A paused scan (see
-    /// <see cref="ScanMemory.ScanPaused"/>) answers with the pieces alone, which is never later.
+    /// this call had to search is not all ASCII (case-insensitive pieces, or the scan; D144), or
+    /// <see cref="Cancelled"/> when the scan found the search's budget spent. While the scan is
+    /// armed the answer depends only on the subject and the two positions; <paramref name="memory"/>
+    /// only saves searching again. A paused scan (see <see cref="ScanMemory.ScanPaused"/>) answers
+    /// with the pieces alone, which is never later.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="textPos">Where the next attempt would start.</param>
@@ -1053,17 +1193,30 @@ internal sealed class FuzzyLiteralFilter
                 memory.Found[j] = at < 0 ? Absent : textPos + at;
             }
 
-            // Everything this piece's search looked at must be ASCII, or its answer is not the
-            // engine's. The found piece's own characters are part of that.
+            // Case-insensitive: everything this piece's search looked at must be ASCII, or its
+            // answer is not the engine's. The found piece's own characters are part of that. An
+            // ordinal search's answer holds over any text (D144, the class remarks).
             int searched = memory.Found[j] == Absent ? sliceEnd : memory.Found[j] + piece.Length;
-            if (searched > textPos && !memory.IsAscii(text, textPos, searched))
+            if (!_anyEncoding && searched > textPos && !memory.IsAscii(text, textPos, searched))
             {
                 return CannotTell;
             }
 
             if (memory.Found[j] != Absent)
             {
-                start = Math.Min(start, (long)memory.Found[j] - Offsets[j] - MaxErrors);
+                int found = memory.Found[j];
+                System.Diagnostics.Debug.Assert(
+                    !_anyEncoding || text.Slice(found, piece.Length).SequenceEqual(piece),
+                    "an ordinal piece is found as its own code units"
+                );
+                long bound = (long)found - Offsets[j] - MaxErrors;
+                if (_anyEncoding && SurrogateIn(text, (int)Math.Max(textPos, bound), found))
+                {
+                    // A character before the piece may be two units: the bound that always holds.
+                    bound -= MaxErrors;
+                }
+
+                start = Math.Min(start, bound);
             }
         }
 
@@ -1071,9 +1224,30 @@ internal sealed class FuzzyLiteralFilter
     }
 
     /// <summary>
+    /// D144: whether <c>[from, to)</c> holds a surrogate, paired or not. A lone one is one unit to
+    /// the engine, so counting it only widens the bound.
+    /// </summary>
+    /// <param name="text">The whole subject.</param>
+    /// <param name="from">The start of the window.</param>
+    /// <param name="to">Its end; an empty window holds none.</param>
+    /// <returns>Whether the window holds a surrogate.</returns>
+    private static bool SurrogateIn(ReadOnlySpan<char> text, int from, int to)
+    {
+        if (to <= from)
+        {
+            return false;
+        }
+
+        WorkCounter.Searched(to - from);
+
+        // The ushort form, as in ScanMemory.IsAscii: the char form of the range searches boxes.
+        return MemoryMarshal.Cast<char, ushort>(text[from..to]).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDFFF) >= 0;
+    }
+
+    /// <summary>
     /// Whether a reverse match could lie anywhere in <c>[sliceStart, textPos)</c>: <see langword="false"/>
-    /// only when that stretch is all ASCII and holds no piece. As with <see cref="NextStart"/>, the
-    /// answer depends only on the subject and the two positions.
+    /// only when that stretch holds no piece and, for a case-insensitive filter, is all ASCII (D144).
+    /// As with <see cref="NextStart"/>, the answer depends only on the subject and the two positions.
     /// </summary>
     /// <param name="text">The whole subject.</param>
     /// <param name="sliceStart">The start of the slice.</param>
@@ -1122,7 +1296,8 @@ internal sealed class FuzzyLiteralFilter
             memory.AbsentBelow[j] = textPos;
         }
 
-        if (!memory.IsAscii(text, sliceStart, textPos))
+        // Case-insensitive only: no piece is no match over any text for an ordinal filter (D144).
+        if (!_anyEncoding && !memory.IsAscii(text, sliceStart, textPos))
         {
             memory.WitnessEnd = memory.AsciiEnd + 1;
             return true;

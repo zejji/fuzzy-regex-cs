@@ -22,10 +22,3 @@ internal sealed class UnscopedFlagSetException(int globalFlags) : Exception
 /// caller of the public API.
 /// </summary>
 internal sealed class ParseErrorException : Exception;
-
-/// <summary>
-/// Upstream <c>_FirstSetError</c> (<c>upstream/regex/_regex_core.py</c> lines 68-70): thrown when
-/// a node cannot contribute to the pattern's first set. The compiler catches it and simply skips
-/// the first-set optimisation.
-/// </summary>
-internal sealed class FirstSetErrorException : Exception;

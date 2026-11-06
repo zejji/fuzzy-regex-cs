@@ -274,6 +274,70 @@ public sealed class AllocationTests
         allocated.Should().BeLessThanOrEqualTo(jitCeiling, "nothing reads D101's call and verb facts here");
     }
 
+    /// <summary>
+    /// D138: a <see cref="MatchCollection"/> read only part-way never hands its walk's state back
+    /// to the pattern's cache, so every such <c>Matches</c> call builds a fresh state. Release 1.2
+    /// made that state 240 B bigger than 1.1.0's; the lists a plain or fuzzy pattern never fills
+    /// are now created on first use. The ceilings are v1.1.0 (8de8eaf8)'s counts for the same call
+    /// (Debug, JIT, 2026-11-04); main 0664d20f allocated 3,704, 5,280 and 4,120 B. Native AOT
+    /// allocates differently and has no measured ceiling here, so the test runs under the JIT only.
+    /// </summary>
+    /// <param name="pattern">A pattern with no group call, verb or best match.</param>
+    /// <param name="jitCeiling">v1.1.0's bytes for one call under the JIT, Debug.</param>
+    [Test]
+    [Arguments(@"\w+", 3_456)]
+    [Arguments(@"(\w)+", 5_032)]
+    [Arguments(@"(?:fox){e<=1}", 3_904)]
+    public void A_Matches_call_read_part_way_allocates_no_more_than_1_1_0_did(string pattern, long jitCeiling)
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceilings are the JIT's; Native AOT's were not measured");
+        }
+
+        FuzzyRegex regex = new(pattern);
+        const string subject = "the quick brown fox jumps over the lazy box";
+        _ = regex.Matches(subject)[1];
+
+        long allocated = AllocatedBy(() => () => _ = regex.Matches(subject)[1]);
+
+        allocated
+            .Should()
+            .BeLessThanOrEqualTo(
+                jitCeiling,
+                "a state for a pattern without calls, verbs or BESTMATCH fills none of them"
+            );
+    }
+
+    /// <summary>
+    /// D135: a pattern with a keyed lookaround and a capture group needs, for a partial call, only
+    /// how many groups are open at each keyed repeat; building the map of every node's open groups
+    /// to answer that cost 7-12% of its compile allocation. The ceilings are the count-only walk's
+    /// (Debug, JIT, 2026-11-06); the integration branch before it, e9c4161a, allocated 33,768 and
+    /// 112,920 B. Native AOT was not measured, so the test runs under the JIT only.
+    /// </summary>
+    /// <param name="pattern">The pattern: a keyed lookaround and a capture group.</param>
+    /// <param name="jitCeiling">The fix's bytes for one compile under the JIT, Debug.</param>
+    [Test]
+    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_288)]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_544)]
+    public void Compiling_a_pattern_with_a_keyed_lookaround_and_a_group_counts_open_groups_only(
+        string pattern,
+        long jitCeiling
+    )
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceilings are the JIT's; Native AOT's were not measured");
+        }
+
+        _ = new FuzzyRegex(pattern);
+
+        long allocated = AllocatedBy(() => () => _ = new FuzzyRegex(pattern));
+
+        allocated.Should().BeLessThanOrEqualTo(jitCeiling, "a partial call reads only the open-group counts");
+    }
+
     [Test]
     public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
     {

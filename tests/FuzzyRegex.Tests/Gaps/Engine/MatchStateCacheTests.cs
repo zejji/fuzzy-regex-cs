@@ -494,6 +494,46 @@ public sealed class MatchStateCacheTests
                 // D101 option D's tail summaries, made on first use.
                 field.SetValue(state, new Dictionary<(long, long), long> { [(7, 7)] = 7 });
                 break;
+            // D138: the call, BESTMATCH, D94 and D101 tail state a state makes on first use.
+            case null when field.FieldType == typeof(CaptureTextIds):
+                var texts = new CaptureTextIds();
+                texts.Reset("scribbled".AsMemory());
+                _ = texts.IdOf(1, 2);
+                field.SetValue(state, texts);
+                break;
+            case null when field.FieldType == typeof(List<RepeatStateKey>):
+                field.SetValue(state, new List<RepeatStateKey> { new(7, 7, 7, 7, 7, 7, 7, true) });
+                break;
+            case null when field.FieldType == typeof(HashSet<(long Key, int Reach)>):
+                field.SetValue(state, new HashSet<(long Key, int Reach)> { (7, 7) });
+                break;
+            case null when field.FieldType == typeof(Dictionary<(long Key, int Reach), int>):
+                field.SetValue(state, new Dictionary<(long Key, int Reach), int> { [(7, 7)] = 7 });
+                break;
+            case null when field.FieldType == typeof(List<CallSection>):
+                field.SetValue(state, new List<CallSection> { new(7, 7, 7, 7) });
+                break;
+            case null when field.FieldType == typeof(List<long>):
+                field.SetValue(state, new List<long> { 7 });
+                break;
+            case null when field.FieldType == typeof(List<int>):
+                field.SetValue(state, new List<int> { 7 });
+                break;
+            case null when field.FieldType == typeof(long[]):
+                field.SetValue(state, new long[] { 7, 7, 7 });
+                break;
+            case null when field.FieldType == typeof(List<FuzzyChange>):
+                field.SetValue(state, new List<FuzzyChange> { new(1, 7) });
+                break;
+            case null when field.FieldType == typeof(List<MatchState.BestWalkFailure>):
+                field.SetValue(state, new List<MatchState.BestWalkFailure> { new(7, 7, 7, true, 7, 7) });
+                break;
+            case null when field.FieldType == typeof(List<MatchState.CallOutcomeTrack>):
+                field.SetValue(state, new List<MatchState.CallOutcomeTrack> { new(true, true, true, 7) });
+                break;
+            case null when field.FieldType == typeof(List<MatchState.TailTrack>):
+                field.SetValue(state, new List<MatchState.TailTrack> { new(7, 7, 7, 7, 7, 7, 7) });
+                break;
             case List<LookaroundSuccess> successes:
                 successes.Add(new LookaroundSuccess(7, [new GroupSpan(7, 7)], [7], []));
                 break;
@@ -556,6 +596,17 @@ public sealed class MatchStateCacheTests
         switch (value)
         {
             case null:
+                lines.Add($"{path}=null");
+                break;
+            // D138: many collections are made on first use and then kept, so an empty one is the
+            // same as none; so is a table of capture texts that holds no id yet, and BESTMATCH's
+            // saved counts once Init has zeroed them.
+            case ICollection { Count: 0 } and not Array:
+            case HashSet<(long Key, int Reach)> { Count: 0 }:
+            case CaptureTextIds { Count: 0 }:
+            case long[] bestCounts
+                when string.Equals(path, nameof(MatchState.BestFuzzyCounts), StringComparison.Ordinal)
+                    && Array.TrueForAll(bestCounts, static count => count == 0):
                 lines.Add($"{path}=null");
                 break;
             case string or bool or int or long or ushort or byte or Enum:

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics;
 
 namespace Fuzzy.Text.RegularExpressions.Parsing;
@@ -204,6 +205,105 @@ internal static class PatternCompiler
         }
     }
 
+    /// <summary>
+    /// NOT UPSTREAM (D140): the global flags that the inline flag groups at the very start of
+    /// <paramref name="pattern"/> turn on, read before the first parse so that the parse does not
+    /// have to discover them by throwing <see cref="UnscopedFlagSetException"/> and starting again.
+    /// </summary>
+    /// <param name="pattern">The pattern text.</param>
+    /// <returns>
+    /// The global flags of each leading <c>(?letters)</c> group, and of a final
+    /// <c>(?letters:</c>; zero when the pattern does not start with one.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// sync-divergence: upstream's <c>_compile</c> (<c>upstream/regex/_main.py:540-556</c>) starts
+    /// every pattern from the caller's flags and learns each new global flag from
+    /// <c>_UnscopedFlagSet</c>, raised by <c>parse_flags_subpattern</c>
+    /// (<c>upstream/regex/_regex_core.py:1199-1205</c>) / this seeds the first attempt with the
+    /// flags of the leading groups, and keeps the catch for every group it does not read / a throw
+    /// costs about 3 us, more than compiling <c>abc</c> (D140). Re-aligning: if upstream changes
+    /// which flags are global, the inline flag letters, or the order of
+    /// <see cref="ParseFunctions.ParseFlagsSubpattern"/>'s checks, re-check the argument below.
+    /// </para>
+    /// <para>
+    /// The result is the one the throws reach, because each group read here is one the parse
+    /// would reach first and throw at, with exactly these flags. The parse starts at the
+    /// pattern's first character (<see cref="ParseFunctions.ParseSequence"/>), sends a <c>(</c> to
+    /// <see cref="ParseFunctions.ParseParen"/>, which sends <c>(?</c> followed by none of
+    /// <c>&lt; = ! P # ( &gt; | R &amp;</c>, a digit, or a sign and a digit to
+    /// <see cref="ParseFunctions.ParseFlagsSubpattern"/>; no flag letter is one of those. There
+    /// <see cref="ParseFunctions.ParseFlagSet"/> reads the same letters this does (<c>V</c> takes
+    /// the next character), and with no <c>-</c> nothing can fail before the throw. A group whose
+    /// global flags are already held parses as positional flags, which never throws
+    /// (<see cref="ParseFunctions.ParsePositionalFlags"/>), and the next group's <c>(</c> follows
+    /// at once. The scan stops at anything else - whitespace, a comment, a <c>-</c>, an unknown
+    /// letter, the end - without that group's flags, which leaves the group to the parse and its
+    /// catch exactly as before. Each attempt builds a new <see cref="Info"/>, so skipping
+    /// attempts leaves no state behind.
+    /// </para>
+    /// <para>
+    /// Three of the stops are needed, and <c>LeadingGlobalFlagsWithoutExceptionTests</c> goes red
+    /// without each: a group with a <c>-</c> can fail before it throws (<c>(?V0-b)</c> under
+    /// <see cref="FuzzyRegexOptions.Version1"/>), so can one with no <c>)</c> or <c>:</c> after its
+    /// letters, and <c>(?e)</c> after the start may not be a group at all (<c>[(?e)]</c>). Stopping
+    /// after <c>(?letters:</c> and at whitespace is not needed - a global flag is global in any
+    /// scope and whitespace cannot fail - but keeps this to the groups the argument above covers.
+    /// </para>
+    /// </remarks>
+    internal static int LeadingGlobalFlags(string pattern)
+    {
+        FrozenDictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> inlineFlags = _inlineFlags.GetAlternateLookup<
+            ReadOnlySpan<char>
+        >();
+        int globalFlags = 0;
+        int pos = 0;
+        while (pos + 1 < pattern.Length && pattern[pos] == '(' && pattern[pos + 1] == '?')
+        {
+            pos += 2;
+            int groupFlags = 0;
+            while (pos < pattern.Length)
+            {
+                int length = pattern[pos] == 'V' ? 2 : 1;
+                if (
+                    pos + length > pattern.Length
+                    || !inlineFlags.TryGetValue(pattern.AsSpan(pos, length), out int flag)
+                )
+                {
+                    break;
+                }
+
+                // ParseParenCore sends these characters to other parsers before it tries the flags.
+                Debug.Assert(!"<=!P#(>|R&+-0123456789".Contains(pattern[pos], StringComparison.Ordinal));
+                groupFlags |= flag;
+                pos += length;
+            }
+
+            if (pos == pattern.Length || pattern[pos] is not (')' or ':'))
+            {
+                break;
+            }
+
+            globalFlags |= groupFlags & RegexFlags.GlobalFlags;
+            if (pattern[pos] == ':')
+            {
+                break;
+            }
+
+            pos++;
+        }
+
+        return globalFlags;
+    }
+
+    /// <summary>
+    /// <see cref="RegexFlags.InlineFlags"/> as a frozen dictionary, which
+    /// <see cref="LeadingGlobalFlags"/> searches by a slice of the pattern without allocating.
+    /// </summary>
+    private static readonly FrozenDictionary<string, int> _inlineFlags = RegexFlags.InlineFlags.ToFrozenDictionary(
+        StringComparer.Ordinal
+    );
+
     private static CompiledPattern CompileUnderVersion(
         string pattern,
         int flags,
@@ -229,7 +329,7 @@ internal static class PatternCompiler
         Source source;
         Info info;
         RegexBase parsed;
-        int globalFlags = flags;
+        int globalFlags = flags | LeadingGlobalFlags(pattern);
 
         while (true)
         {
@@ -478,23 +578,18 @@ internal static class PatternCompiler
             offset += word.Length;
         }
 
-        if (!parsed.HasSimpleStart())
+        // Get the first set, if possible. With no first set the engine simply scans from every
+        // position.
+        // sync-divergence: upstream catches _FirstSetError here (_regex_core.py:4536) / this tests
+        // for null / a thrown exception was most of a fuzzy pattern's compile (D139). Re-aligning:
+        // see RegexBase.GetFirstset.
+        if (!parsed.HasSimpleStart() && parsed.GetFirstset(reverse) is { } firstset)
         {
-            // Get the first set, if possible.
-            try
+            List<uint> firstsetCode = ParseFunctions.FlattenCode(ParseFunctions.CompileFirstset(info, firstset));
+            flatCode = [.. firstsetCode, .. flatCode];
+            if (optionalPassEnds is not null)
             {
-                List<uint> firstsetCode = ParseFunctions.FlattenCode(
-                    ParseFunctions.CompileFirstset(info, parsed.GetFirstset(reverse))
-                );
-                flatCode = [.. firstsetCode, .. flatCode];
-                if (optionalPassEnds is not null)
-                {
-                    optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
-                }
-            }
-            catch (FirstSetErrorException)
-            {
-                // No usable first set; the engine simply scans from every position.
+                optionalPassEnds = [.. optionalPassEnds.Select(o => o + firstsetCode.Count)];
             }
         }
 

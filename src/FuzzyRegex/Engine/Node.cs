@@ -145,6 +145,22 @@ internal sealed class Node
         set => SetFlag(_savesOnlyForCallsFlag, value);
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D143: for a <c>FUZZY</c> node, whether its budget is plain enough for
+    /// <c>Matcher.ThisErrorPermitted</c> and <c>Matcher.AnyErrorPermitted</c> to compare the error
+    /// count alone. Set once by <c>NodeCompiler.BuildFuzzy</c> from
+    /// <c>Matcher.HasPlainErrorBudget</c>. A bit here costs no memory; a <see langword="bool"/> field
+    /// added 8 bytes to every node.
+    /// </summary>
+    internal bool HasPlainErrorBudget
+    {
+        get => (_flags & _plainErrorBudgetFlag) != 0;
+        set => SetFlag(_plainErrorBudgetFlag, value);
+    }
+
+    /// <summary>Bit of <see cref="_flags"/> for <see cref="HasPlainErrorBudget"/>.</summary>
+    private const int _plainErrorBudgetFlag = 8;
+
     /// <summary>Bit of <see cref="_flags"/> for <see cref="MemoisesNegativeOutcome"/>.</summary>
     private const int _memoisesNegativeOutcomeFlag = 1;
 
@@ -203,13 +219,14 @@ internal sealed class Node
     /// <summary>
     /// NOT UPSTREAM (S62): what <c>Matcher.MatchesOne</c> answers for each ASCII codepoint, bit
     /// <c>ch &amp; 63</c> of element <c>ch &gt;&gt; 6</c>, or <see langword="null"/> for a node it is not
-    /// kept for (<see cref="Matcher.HasAsciiAnswers"/>). Allocated when the node is built and filled by
-    /// <see cref="Matcher.FillAsciiAnswers"/> as the last step of <see cref="PatternObject.Compile"/>,
-    /// by asking the node's own predicate, so the two cannot disagree; nothing writes it after.
-    /// The idea is .NET's <c>RegexCharClass</c> ASCII lookup, computed eagerly here because a
-    /// compiled pattern is never written while it matches.
+    /// kept for (<see cref="Matcher.HasAsciiAnswers"/>) or for a set member, which its set answers for
+    /// (D141). Set by <see cref="Matcher.FillAsciiAnswers"/> as the last step of
+    /// <see cref="PatternObject.Compile"/>, by <see cref="AsciiAnswers"/> or the node's own predicate,
+    /// which tests prove agree; nothing writes it after. The idea is .NET's <c>RegexCharClass</c>
+    /// ASCII lookup, computed eagerly here because a compiled pattern is never written while it
+    /// matches.
     /// </summary>
-    internal ulong[]? AsciiAnswers { get; init; }
+    internal ulong[]? AsciiAnswers { get; set; }
 
     /// <summary>Upstream <c>status</c>: the <see cref="NodeStatus"/> bits.</summary>
     internal uint Status;
