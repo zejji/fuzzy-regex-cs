@@ -24,10 +24,9 @@ measurement, WPR profiles and benchmarks.
 | 11 | Myers on short subjects | - | not started | A-B-B-A with A-A control decides |
 | 12 | Repeat memo `HashSet` (~3%) | - | not started | |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
-
 Waiting on the owner: item 7's merge to main and push (all gates green).
 
-"Green" = ratchet GREEN and oracle 3 seeds with only D142 diverging (identical on main). Profile:
+"Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
 
 ## Rules
@@ -42,8 +41,7 @@ Waiting on the owner: item 7's merge to main and push (all gates green).
 
 ## In flight
 
-- Overnight to 07:40 (owner 2026-11-05): machine free for timing. AC sleep disabled.
-- BDN night 2 done 03:22; CPU cap restored (PROCFREQMAX AC 0). Worktrees `bdn-p11main`, `bdn-p11int` kept for re-runs.
+- Machine free for timing to 07:40 (owner 2026-11-05); AC sleep off. BDN night 2 done 03:22, CPU cap restored.
 - Item 11 experiment: worktree `p11-myers` (env FUZZYREGEX_SCAN_MIN, never to be committed), harness `.scratch/p11-myers/`.
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
