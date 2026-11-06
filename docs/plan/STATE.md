@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-06 04:35 by Claude Code (D135 merged into p11; item 11 timing running).
+**Updated:** 2026-11-06 05:15 by Claude Code (item 11 settled: keep the scan; item 8 profile next).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -21,7 +21,7 @@ measurement, WPR profiles and benchmarks.
 | 8 | Grouped fuzzy repeats `(?:(\w+) jumps over){e<=2}` | - | not started | WPR profile first |
 | 9 | D29 + D135 compile allocation | D135 `perf/d135-open-group-counts` 4b0bd431 | D135 merged into p11 2c45e127 (ratchet GREEN, oracle: known rows only) | D29 |
 | 10 | `(?b)` 544 B per call | - | not started | |
-| 11 | Myers on short subjects | worktree `p11-myers` (experiment) | A-B-B-A running (`.scratch/p11-myers/`) | decide from A-A control |
+| 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
 | 12 | Repeat memo `HashSet` (~3%) | - | not started | |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 Waiting on the owner: item 7's merge to main and push (all gates green).
@@ -46,4 +46,4 @@ Waiting on the owner: item 7's merge to main and push (all gates green).
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-**Next action:** read item 11's A-B-B-A; item 8 WPR (`.scratch/p11-item8/grouped.cs`); D29.
+**Next action:** item 8 WPR (`.scratch/p11-item8/grouped.cs`); D29.
