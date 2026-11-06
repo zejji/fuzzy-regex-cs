@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-06 04:05 by Claude Code (BDN + oracle on p11 green; D135 fixed on its branch).
+**Updated:** 2026-11-06 04:35 by Claude Code (D135 merged into p11; item 11 timing running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -17,11 +17,11 @@ measurement, WPR profiles and benchmarks.
 | 4 | D143 plain error budget | `perf/d143-error-permitted` bd5a1eb4 | green | merge via #7 |
 | 5 | D144 filter on non-ASCII text | `perf/d144-filter-ascii` 717b174f | green, blind review clean | merge via #7 |
 | 6 | D145 fuzzy partial prefilter | `perf/d145-partial-filter` eb555b33 | green, proof + review clean | merge via #7; add a BDN fuzzy partial row |
-| 7 | Integration to main (owner approved) | `perf/phase11-integration` 38e9cea0, worktree `p11` | all gates green: ratchet (10,246), BDN 0.959 vs main, nothing slower (`bench/baselines/.../2026-11-06-phase11-integration-vs-main.md`), oracle 3 seeds (only D151-D153, identical on main) | owner: merge to main and push |
+| 7 | Integration to main (owner approved) | `perf/phase11-integration` 2c45e127, worktree `p11` | all gates green: ratchet (10,246), BDN 0.959 vs main, nothing slower (`bench/baselines/.../2026-11-06-phase11-integration-vs-main.md`), oracle 3 seeds (only D151-D153, identical on main) | owner: merge to main and push |
 | 8 | Grouped fuzzy repeats `(?:(\w+) jumps over){e<=2}` | - | not started | WPR profile first |
-| 9 | D29 + D135 compile allocation | D135: `perf/d135-open-group-counts`, worktree `d135` | D135 fixed (-10.3% / -6.5% compile bytes), ratchet running | D135 commit + merge into p11; D29 next |
+| 9 | D29 + D135 compile allocation | D135 `perf/d135-open-group-counts` 4b0bd431 | D135 merged into p11 2c45e127 (ratchet GREEN, oracle: known rows only) | D29 |
 | 10 | `(?b)` 544 B per call | - | not started | |
-| 11 | Myers on short subjects | - | not started | A-B-B-A with A-A control decides |
+| 11 | Myers on short subjects | worktree `p11-myers` (experiment) | A-B-B-A running (`.scratch/p11-myers/`) | decide from A-A control |
 | 12 | Repeat memo `HashSet` (~3%) | - | not started | |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 Waiting on the owner: item 7's merge to main and push (all gates green).
@@ -46,5 +46,4 @@ Waiting on the owner: item 7's merge to main and push (all gates green).
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-**Next action:** commit D135 and merge into p11; item 11 A-B-B-A (`.scratch/p11-myers/harness.cs`);
-item 8 WPR (`.scratch/p11-item8/grouped.cs`).
+**Next action:** read item 11's A-B-B-A; item 8 WPR (`.scratch/p11-item8/grouped.cs`); D29.
