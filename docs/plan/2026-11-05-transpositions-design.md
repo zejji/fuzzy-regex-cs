@@ -256,7 +256,7 @@ cover.
   `MinBase` = 1, `MaxBase` = 5, `CostBase` = 9 (`Node.cs:457-531`, upstream `RE_FUZZY_VAL_*`).
   There is no free slot, so a fourth kind either renumbers every base or adds a separate block.
   Question 10.17.
-- 283 lines in `src/` mention `FuzzyValue`, 234 of them in `Matcher.cs` (counted 2026-11-06), including the
+- 281 lines in `src/` use `FuzzyValue.`, 233 of them in `Matcher.cs` (counted 2026-11-06), including the
   inline count buffers (`Engine/InlineBuffers.cs:42-43`) and fold edit kinds (`Matcher.cs:12429-12438`).
 - Errors are made one item at a time in `NextFuzzyMatchItem` (`Matcher.cs:9967-10070`), walked by
   `FuzzyMatchItem`/`RetryFuzzyMatchItem` (`:11751`, `:11884`). The string forms
