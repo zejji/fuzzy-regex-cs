@@ -43,10 +43,7 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** D29 part 2: ratchet running on worktree `d29` (PID 21164, log
-`.scratch/d29/ratchet-20261114b.log`, ends `EXIT n`); if GREEN, commit on `perf/d29-expanded-folds` with
-STATUS.md and status-stamp.txt, oracle 3 seeds (runner pattern `.scratch/p11-item8/oracle-both.ps1`), merge.
-Then a ratchet on main after both merges. Then D157 (`(?b)(?:fo\B){s<=1,i<=1,d<=1}` fullmatch `xo`
-matches at cost 3 in the port, not upstream: a plain fuzzy row, worth judging first), then item 10.
-AC sleep is Never since 15:50: restore with `powercfg /change standby-timeout-ac 30` when runs end.
-Watchdog PID 32968, jbguard PID 28336. Main is 14 commits ahead of origin; pushing needs the owner.
+**Next action:** D29 part 2: ratchet on worktree `d29` (PID 21164, `.scratch/d29/ratchet-20261114b.log`);
+if GREEN commit with STATUS.md + stamp, oracle 3 seeds (`.scratch/p11-item8/oracle-both.ps1` pattern), merge;
+ratchet on main. Then D157 (plain fuzzy fullmatch row, judge first), then item 10. AC sleep Never since
+15:50 (restore to 30); watchdog 32968, jbguard 28336. Main 14 ahead of origin; push needs the owner.
