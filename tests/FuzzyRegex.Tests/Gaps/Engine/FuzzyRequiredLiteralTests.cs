@@ -119,6 +119,66 @@ public sealed class FuzzyRequiredLiteralTests
             );
     }
 
+    [Test]
+    [Arguments(FuzzyRegexOptions.None)]
+    [Arguments(FuzzyRegexOptions.BestMatch)]
+    [Arguments(FuzzyRegexOptions.EnhanceMatch)]
+    [Arguments(FuzzyRegexOptions.Posix)]
+    [Arguments(FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase)]
+    [Arguments(FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.Version1)]
+    public void The_screen_never_changes_an_answer_under_flags_windows_and_overlap(FuzzyRegexOptions options)
+    {
+        // The same differential as above, widened to what a blind review found unwitnessed: the
+        // matching flags, a search window that ends early (the scan's end is the slice end),
+        // overlapped searches, and non-ASCII subjects (which must switch the screen off, not
+        // refuse).
+        string[] patterns = [@"(?:(\w+) jumps over){e<=2}", @"(?:\w+ needle){s<=1,i<=1}", @"(?:(\w+?) haystack){d<=2}"];
+        string[] literals = [" jumps over", " needle", " haystack"];
+#pragma warning disable CA5394, S2245 // A seeded sequence, so a failure replays; nothing here is a secret.
+        var random = new Random(20261114 + (int)options);
+        var differences = new List<string>();
+        for (int p = 0; p < patterns.Length; p++)
+        {
+            var screened = new FuzzyRegex(patterns[p], options);
+            var plain = new FuzzyRegex(patterns[p], options);
+            screened.PatternObject.RequiredLiteralFilter.Should().NotBeNull(patterns[p]);
+            plain.PatternObject.RequiredLiteralFilter = null;
+            for (int i = 0; i < 150; i++)
+            {
+                string subject = Subject(random, literals[p]);
+                if (random.Next(4) == 0)
+                {
+                    subject = subject.Insert(random.Next(subject.Length + 1), random.Next(2) == 0 ? "é" : "\U0001F600");
+                }
+
+                int beginning = random.Next(Math.Max(1, subject.Length / 3));
+                int length = random.Next(2) == 0 ? -1 : random.Next(subject.Length - beginning + 1);
+                foreach (bool overlapped in (bool[])[false, true])
+                {
+                    string a = Describe(screened.Matches(subject, beginning, length, overlapped));
+                    string b = Describe(plain.Matches(subject, beginning, length, overlapped));
+                    if (!string.Equals(a, b, StringComparison.Ordinal))
+                    {
+                        differences.Add(
+                            $"{patterns[p]} over '{subject}' [{beginning},{length},{overlapped}]: screened {a}, plain {b}"
+                        );
+                    }
+                }
+            }
+        }
+#pragma warning restore CA5394, S2245
+
+        differences.Should().BeEmpty();
+
+        static string Describe(MatchCollection matches) =>
+            string.Join(
+                ";",
+                matches.Select(static m =>
+                    $"{m.Index},{m.Length},{m.FuzzyCounts},{string.Join("/", m.Groups.Cast<Group>().Skip(1).Select(static g => $"{g.Index}:{g.Length}:{g.Success}"))}"
+                )
+            );
+    }
+
 #pragma warning disable CA5394, S2245 // A seeded sequence, so a failure replays; nothing here is a secret.
     private static string Subject(Random random, string literal)
     {
