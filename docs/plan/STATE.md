@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-14 18:15 by Claude Code (D29 merged 441c8d8d; builders on items 10 and 12).
+**Updated:** 2026-11-14 18:40 by Claude Code (item 12 closed: not worth doing, measured).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -16,7 +16,7 @@ measurement, WPR profiles and benchmarks.
 | 9 | D29 + D135 compile allocation | `perf/d29-expanded-folds` | D135 merged; D29 part 2 merged to main 441c8d8d (ignore-case compile 33,904 to 17,816 B) | remaining D29 bytes spread thin; judge after item 10 |
 | 10 | `(?b)` 544 B per call | `perf/item10-bestmatch-alloc`, worktree `item10` | builder (Opus) started 18:10 | gates, merge |
 | 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
-| 12 | Repeat memo `HashSet` (~3%) | `perf/item12-repeat-memo`, worktree `item12` | builder (Opus) started 18:10: re-profile first | gates, timing window |
+| 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
@@ -43,7 +43,7 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** builders on items 10 and 12 (Opus subagents; ask them for status before inferring). D157:
+**Next action:** builder on item 10 (Opus subagent; ask it for status before inferring); transpositions cross-check running (Fable; Junie PID 5108). D157:
 ratchet PID 6244 (`.scratch/d157/ratchet.log`), then commit (`.scratch/d157/msg.txt`), merge. Transpositions:
 page http://127.0.0.1:62013/; set-usage study running; then cross-check T10-8 and T10-12, API overview, owner
 answers, fold-back. AC sleep Never since 15:50 (restore to 30). Main ahead of origin; push needs the owner.
