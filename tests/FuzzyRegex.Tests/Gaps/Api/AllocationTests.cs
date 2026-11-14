@@ -243,6 +243,32 @@ public sealed class AllocationTests
     }
 
     /// <summary>
+    /// D29: under full case folding, <c>Sequence._fix_full_casefold</c> compares a literal's folded
+    /// text with the full fold of every character that expands under folding. That list depends on
+    /// nothing in the pattern, but the port refolded all of it on every literal, so compiling
+    /// <c>(?i)(?:hello world){e&lt;=2}</c> allocated 33,904 B (Release, main 5b5592fb, 2026-11-14)
+    /// against 13,008 B for <c>(?:needle){e&lt;=1}</c>: half of it the refolding (allocation ticks
+    /// traced with dotnet-trace, <c>.scratch/d29/types</c>), and a closure per character in
+    /// <c>PythonStr.Lower</c> another 88 B a character. Ignoring case now costs a literal little
+    /// more than its own characters' folds and the filter's case tables.
+    /// </summary>
+    [Test]
+    public void Ignoring_case_does_not_refold_the_expanding_characters_on_every_compile()
+    {
+        const string literal = "(?:hello world){e<=2}";
+        _ = new FuzzyRegex(literal);
+        _ = new FuzzyRegex("(?i)" + literal);
+
+        long exact = AllocatedBy(static () => static () => _ = new FuzzyRegex(literal));
+        long ignoringCase = AllocatedBy(static () => static () => _ = new FuzzyRegex("(?i)" + literal));
+
+        // JIT, Debug: 19,816 B before, 4,696 B with the folds built once, 3,728 B with
+        // PythonStr.Lower's per-character closure gone too. Native AOT has no measured figure.
+        long ceiling = System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported ? 4_200 : 10_000;
+        (ignoringCase - exact).Should().BeLessThan(ceiling, "the expanding characters' folds are constant");
+    }
+
+    /// <summary>
     /// D101 added compile-time facts about lookaround bodies and calls (whether a body reaches a
     /// verb, the lookarounds a call can run, the always-matching lookarounds folded away). A pattern
     /// with lookarounds but no verb and no group call needs none of them, so compiling it allocates

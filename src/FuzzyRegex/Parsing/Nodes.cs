@@ -2006,9 +2006,7 @@ internal class Branch : RegexBase
         );
 
         // Get the characters which expand to multiple codepoints on folding.
-        return Unicode
-            .RegexModule.GetExpandOnFolding()
-            .Any(c => folded.SequenceEqual(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])));
+        return Unicode.RegexModule.GetExpandedFolds().Any(e => folded.SequenceEqual(e));
     }
 
     /// <summary>Upstream <c>Branch._add_precheck</c> (lines 2178-2191).</summary>
@@ -3318,12 +3316,7 @@ internal sealed class Sequence : RegexBase
     private static List<Literal> FixFullCasefold(List<int> characters, int encoding)
     {
         // Get the characters which expand to multiple codepoints on folding, folded.
-        List<int[]> expanded =
-        [
-            .. Unicode
-                .RegexModule.GetExpandOnFolding()
-                .Select(static c => Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])),
-        ];
+        IReadOnlyList<int[]> expanded = Unicode.RegexModule.GetExpandedFolds();
 
         // The folded text, plus the offset in it at which each character's own fold begins.
         // 'boundary' is one longer than the run, so boundary[i]..boundary[i + 1] is character i.
