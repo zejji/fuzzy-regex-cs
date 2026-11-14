@@ -1432,6 +1432,14 @@ internal sealed class MatchState : IDisposable
     internal Matcher.AnchorBanSnapshot? AnchorBanScratch;
 
     /// <summary>
+    /// NOT UPSTREAM (item 10): where a BESTMATCH or ENHANCEMATCH call keeps its best run
+    /// (<c>Matcher.RankedScratch</c>). Null until the first ranked call, then kept for the state's
+    /// life, so a warm ranked call allocates nothing. <see cref="Init"/> empties its lists; the storage
+    /// behind them is kept, and every call writes it before it reads it.
+    /// </summary>
+    internal Matcher.RankedScratch? RankedScratch;
+
+    /// <summary>
     /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
     /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
     /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
@@ -1944,6 +1952,7 @@ internal sealed class MatchState : IDisposable
         }
 
         BestFuzzyChanges?.Clear();
+        RankedScratch?.Reset();
         BestTotalErrors = 0;
         BestTotalCost = 0;
         MaxErrors = 0;
