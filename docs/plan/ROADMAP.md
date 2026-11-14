@@ -916,7 +916,7 @@ release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
   syntax upstream lacks (mrab-regex #400 asks for it, unanswered since 2021), so the differential
   oracle cannot judge it and it needs its own reference matcher. Cost: a fourth error kind through
   the engine, the literal prefilter's soundness argument to redo, and a new
-  `FuzzyCounts.Transpositions`. Proposal and open questions: `2026-11-05-transpositions-design.md`.
+  `FuzzyCounts.Transpositions`. Design, every question decided by 2026-11-14: `2026-11-05-transpositions-design.md`.
 - **A character set per edit kind (later, after transpositions; owner decision 2026-11-14).** Today one
   test set covers every kind a fuzzy section allows (`{i<=1,s<=1:[y]}`); upstream rejects a second set
   (`{i<=1:[x],s<=1:[y]}` is "expected }", regex 2026.9.29) and its maintainer has said changing the one

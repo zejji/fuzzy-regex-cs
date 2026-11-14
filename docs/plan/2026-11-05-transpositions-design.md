@@ -1,8 +1,8 @@
 # Transpositions as a fuzzy error kind: proposal and open questions
 
-**Status:** proposal, parked for a release after 1.3. No release assigned and no work started.
-Owner decisions of 2026-11-05 are marked **Decided**; everything else is a proposal or an open
-question. Recorded in `DECISIONS.md` and `ROADMAP.md` ("Candidates parked for later") the same day.
+**Status:** design decided (every section 10 question answered by 2026-11-14), parked for a release
+after 1.3 (2.0.0, 10.13). No work started. Owner decisions are marked **Decided** with their date;
+anything unmarked is proposal text. Recorded in `DECISIONS.md` and `ROADMAP.md` ("Candidates parked for later") the same day.
 
 ## 1. Summary
 
@@ -337,7 +337,8 @@ Worth documenting the first in `GUIDE.md` whether or not the feature is built.
 
 ## 10. Questions for the owner
 
-**Owner's answers so far (2026-11-06, interactive pass paused at 10.5):**
+**Owner's answers (2026-11-06; 10.8-10.12, 10.14 and 10.17 on 2026-11-14 through the decision page):**
+- 2026-11-14: 10.8 **C** (a test set never constrains a swap); 10.9 **A**; 10.10 **B**; 10.11 **C** (whole characters); 10.12 **B**; 10.14 **A** plus a four-value `Deconstruct` and the documented traps; 10.17 **C**. Every question in this section is now decided.
 - 10.16: **B** - build the literal-only version after 1.3, and document the named-list workaround now.
   Keep tier 1 (adjacent single-character items such as `\d`, `[a-z]`, `.`) cheap to add later: one
   general definition of a swap and a reference matcher built on it from day one.
@@ -799,14 +800,17 @@ liblevenshtein have no test sets, and no other engine with swaps was found with 
   alone, or `t` with only `s`, has no insertion-plus-deletion route, so D applies the substitution
   rule there: a choice, not a measurement.
 
-**Recommendation: D.** It is the only option that keeps the feature's promise in every section:
-"a swap costs two errors today; with the flag it costs one". The measured rows show today's
+**Recommendation (superseded 2026-11-14, revised to C before the owner's answer): D.** It
+kept one reading of the feature in every section, that the flag changes a swap's price and not
+which texts the set admits. The measured rows show today's
 engine already uses both rules, chosen by the kinds the section allows; A and B each keep only
 one of them. For `t` alone D takes the stricter rule, which can later be loosened without any
 match being lost. It is testable against upstream only forward and whole-text: with the flag,
 `{t<=1,K:S}` must accept a one-swap text exactly when upstream's fullmatch with `{K,e<=2:S}`
 does, for the same kinds K. Confidence high; the rule for `t` alone is the one judgement in it,
 and no engine or corpus can inform it, because no engine with swaps tests them.
+
+**Decided 2026-11-14: C** (not tested, as in fuzzy-regex-rs): a test set constrains only insertions and substitutions, as it does today, and never a swap. The docs must say so in one sentence beside the test-set syntax, with the `{t<=1:[xyz]}` over "tecso" example. Clarification f7a364df (decision page) is the evidence trail for D.
 
 ### 10.9 Partial matching halfway through a swap
 
@@ -875,6 +879,8 @@ liblevenshtein have no partial matching.
 rule the port documents for every fuzzy partial, and it is the only option under which a
 half-typed entry that a swap completes stays open. The new thing is charging an edit before it
 completes; the docs must say so in one sentence. Confidence high.
+
+**Decided 2026-11-14: A**, charged one transposition at that position and mirrored under `(?r)`.
 
 ### 10.10 Swaps across nodes
 
@@ -989,6 +995,8 @@ look-ahead at node edges; it exists only once the arm does, and the standard gat
 (BenchmarkDotNet fuzzy rows with the flag off against main, A-B-B-A) shows whether sections
 without swaps pay anything.
 
+**Decided 2026-11-14: B** for the first version: the literal as written, as defined above.
+
 ### 10.11 Case folding
 
 **The question.** Under full case folding, where one character can fold to several (ß to "ss",
@@ -1075,6 +1083,8 @@ is lost; it costs one lookup. D is the right target if a user meets the gap, bec
 what ledger entries 49 and 52 did for the other kinds. Confidence high for A. Choosing between B,
 C and D is deferred rather than open: it needs to know how often an expanding character sits
 inside a swap in real text, which no corpus at hand records.
+
+**Decided 2026-11-14: C, whole characters** (against the recommendation A). A swap exchanges two whole text characters, and each is compared with its pattern character under that node's own folding rule, as the port already does for its other edits since ledger entries 49 and 52.
 
 ### 10.12 The prefilters
 
@@ -1169,6 +1179,8 @@ untouched. B is a later optimisation, worth it only if a benchmark on swap-enabl
 the shorter pieces cost something; that number cannot exist before the feature does. Confidence
 high.
 
+**Decided 2026-11-14: B**: keep today's number of pieces with a one-letter gap between neighbouring pieces that the piece search ignores; the other fast checks use A's larger count.
+
 ### 10.13 `{t...}` is literal text today
 
 **Context.** A brace group that is neither a quantifier nor a valid constraint is literal text
@@ -1250,6 +1262,11 @@ inline letter; counts A. The bit check settles the value. The longer brace form 
 no letter, and it costs nothing in correctness; a letter can be added later without breaking
 anything, while one taken now cannot be withdrawn. fuzzy-regex-rs shows the counts shape in use,
 including the trap the docs must cover. Confidence high.
+
+**Decided 2026-11-14: A, plus the blind reviews' improvements** (owner: "See additional improvements suggested by blind review passes"):
+- `FuzzyCounts` also gains a four-value `Deconstruct(out s, out i, out d, out t)` beside the record's generated three-value one. Overloads of different arity are allowed and bind by the number of variables (learn.microsoft.com/en-us/dotnet/csharp/fundamentals/functional/deconstruct, read 2026-11-14); compiled proof in `.scratch/blind-review/decon/`: a v1 client ran unchanged on the v2 library, `(s, i, d)` binds the triple and `(s, i, d, t)` the new overload.
+- `FuzzyChanges.Transpositions` states its index semantics under `(?r)` and partial matching in its XML docs.
+- The docs name the two traps: `counts is (0, 0, 0)` is true for a match with one swap (`Total` is 1), and `ToString()`, equality and the hash gain the new member even when it is 0 (`.scratch/blind-review/fup-api/findings.md`).
 
 ### 10.15 Comment on upstream issue #400?
 
@@ -1352,3 +1369,5 @@ workaround), `README.md` (fuzzy counts example), `CHANGELOG.md`, `docs/plan/upst
 if #400 is answered, and the XML docs on `FuzzyRegexOptions`, `FuzzyCounts` and `FuzzyChanges`.
 `2026-09-18-fuzzy-regex-rs-techniques.md:42` listed swaps under "never copy" as a semantic of that
 engine; the `DECISIONS.md` entry of 2026-11-05 records why an opt-in form is now acceptable.
+
+**Decided 2026-11-14: C**: always append the swap values after upstream's 13, maximum 0 when swaps are off.

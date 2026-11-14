@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-14 22:15 by Claude Code (item 14: nine rows judged port right, merging).
+**Updated:** 2026-11-14 22:45 by Claude Code (transpositions decided; item 14 merging).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -43,7 +43,6 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner
 
-- Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
-  10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
+- Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** item 14 builders back, review, merge; item 15 timing on a quiet machine. Transpositions: see the brief.
+**Next action:** item 14 builders back, review, merge; item 15 timing on a quiet machine.
