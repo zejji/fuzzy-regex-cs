@@ -155,7 +155,7 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The thirty-nine rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The forty rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -417,6 +417,7 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy", "pattern": "(?b)(?r)(?:b){e<=2}", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "fuzzy", "pattern": "(?b)(?:b){e<=2}$", "flags": 0, "namedLists": {}, "subject": "bba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "fuzzy", "pattern": "(?b)(?:fo\\B){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "xo", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [1], "deletions": [0]}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy", "pattern": "(?b)(?i)(?:[\ud83d\ude00\ud835\udd18]x){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "Xf", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [1], "deletions": [2]}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [1], "deletions": [2]}}}
         """;
 
     /// <summary>
@@ -1998,6 +1999,15 @@ internal static class ExpectedDivergences
         // both explanations cost the same. Judged 2026-11-14 like row 33: entry 42's ordered
         // answer, on top of entry 12's lost candidate.
         [37] = "match 0:(0,2)[(0,2)] last=-1/- fuzzy=(1,1,1)[s:0][i:1][d:1]",
+        // Row 39, D149: `(?b)(?i)(?:[😀𝔘]x){s<=1,i<=1,d<=1}` fullmatched (partial) against 'Xf',
+        // fuzzy row 6099 of the seed-20261105 wave. Upstream keeps (0, 2) at cost three, a
+        // substitution, an insertion and a deletion; this port finds (0, 2) at cost two, deleting
+        // the class and inserting the 'f'. Upstream's flagless answer is its flagged one, so the
+        // discriminator cannot key it. Entry 12's doubled guard is the whole cause: with
+        // PatternObject.DoubleCountTrailingInsertions set this port gives upstream's answer
+        // exactly, and on the minimal `(?b)(?:[ab]x){i<=1,d<=1}` over 'xf' upstream answers no
+        // match where its flagless engine (and this port) find the two-error fit. Judged 2026-11-14.
+        [38] = "match 0:(0,2)[(0,2)] last=-1/- fuzzy=(0,1,1)[s:][i:1][d:0]",
     };
 
     /// <summary>
@@ -6335,7 +6345,7 @@ internal static class ExpectedDivergences
                 + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
                 + ".Bestmatch_reversed_replaces_the_whole_emoji_run, and for the 2026-09-28 'bba' rows, "
                 + ".Bestmatch_keeps_a_one_character_fit_whose_two_trailing_insertions_reach_the_end",
-            // Thirty-nine rows rather than one, because each is a judged member of the family and the
+            // Forty rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
