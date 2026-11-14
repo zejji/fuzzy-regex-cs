@@ -18,6 +18,8 @@ measurement, WPR profiles and benchmarks.
 | 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
+| 14 | Judge unjudged oracle rows D146-D149, D151-D153, D156, D158 (DECISIONS 2026-11-14) | - | to do | each like D157: re-ask upstream, ablate the port's fixes, pin a divergence or register a port bug (fix in 1.3 only if small) |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D91, D99, D105, D116, D118, D123 | - | to do | re-measure each on main; add an item or close with a measured note; D91 against item 10 first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -44,6 +46,5 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** item 10 oracle 3 seeds then merge; tidy KNOWN-DEFECTS (move 10 finished rows) and triage the
-pre-1.0 perf rows; judge oracle rows D146-D149, D151-D153, D156, D158 in 1.3 (owner 2026-11-14). Transpositions:
+**Next action:** item 10 oracle 3 seeds then merge; item 15 (perf row triage), then item 14 (judge oracle rows). Transpositions:
 answers on the decision page (files `.scratch/decision-review/transpositions/`), then fold-back. Details: the brief.
