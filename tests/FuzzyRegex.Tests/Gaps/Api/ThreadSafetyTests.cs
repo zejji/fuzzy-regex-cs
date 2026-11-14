@@ -887,6 +887,9 @@ public sealed class ThreadSafetyTests
             // S60b added FuzzyLiteralFilter, written once by Compile after node numbering. The
             // filter itself is immutable; what a scan learns lives on its MatchState (D14).
             "PatternObject.FuzzyLiteralFilter",
+            // Phase 11 item 8: the required-literal screen, written once by Compile beside
+            // FuzzyLiteralFilter; the same immutable type, its learning on the MatchState.
+            "PatternObject.RequiredLiteralFilter",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
             // Ledger entry 14's refined call guard added HasGroupCalls, set by the node compiler
