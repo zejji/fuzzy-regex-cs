@@ -1713,4 +1713,71 @@ public sealed class FuzzyBestMatchTests
                     + (m.PartialMatch ? " partial" : "")
                 ),
         ];
+
+    /// <summary>
+    /// Item 10: a ranked call keeps its best run in storage the state holds for the next call
+    /// (<c>Matcher.RankedScratch</c>), so one compiled pattern run over a sequence of subjects must
+    /// answer each exactly as a freshly compiled one does. The sequences change the length of the
+    /// best changes list, which groups take part and how many captures a group holds, from one call
+    /// to the next, so storage a call failed to clear or resize would show in the next answer. Each
+    /// subject is searched and then matched at the start; the first pattern's anchored match reaches
+    /// the widened-slice fallback, which reads the best changes list, and its second subject's
+    /// insertions are at other positions than the first's, so a stale list shows (a match reports
+    /// only the first <c>sum(counts)</c> changes, so the same positions would hide it).
+    /// </summary>
+    /// <param name="pattern">The ranked pattern.</param>
+    /// <param name="subjects">The subjects, in the order the shared pattern sees them.</param>
+    [Test]
+    [Arguments(
+        @"(?b)(^\d{12}$){i<=12}",
+        new[] { "123456789012xxxxxxxxxxxx", "x123456789012xxxxxxxxxx", "123456789012xxxxxxxxxxxx" }
+    )]
+    [Arguments(@"(?b)(?:(hay)|(sta))(?:ck){e<=2}", new[] { "a hayck here", "a stack here", "a hayk here", "nothing" })]
+    [Arguments(@"(?b)(?:(a)+x){e<=1}", new[] { "aaaaay", "aay", "aaaaaaaay", "b" })]
+    [Arguments(@"(?e)(?:(hay)|(sta))(?:ck){e<=2}", new[] { "a hayck here", "a stack here", "a hayk here", "nothing" })]
+    [Arguments(@"(?e)(?:(a)+x){e<=1}", new[] { "aaaaay", "aay", "aaaaaaaay", "b" })]
+    [Arguments(
+        @"(?b)(?:haystack){1i+1d+2s<=4}",
+        new[] { "a haystakc.", "a haystack.", "a haystck and a haystac", "none" }
+    )]
+    public void A_warm_ranked_call_answers_as_a_fresh_pattern_does(string pattern, string[] subjects)
+    {
+        FuzzyRegex shared = new(pattern);
+
+        foreach (string subject in subjects)
+        {
+            Describe(shared.Match(subject)).Should().Be(Describe(new FuzzyRegex(pattern).Match(subject)), subject);
+            Describe(shared.MatchAtStart(subject))
+                .Should()
+                .Be(Describe(new FuzzyRegex(pattern).MatchAtStart(subject)), "anchored at the start of " + subject);
+        }
+    }
+
+    /// <summary>Everything a match reports, as text, so two matches compare in one assertion.</summary>
+    /// <param name="m">The match.</param>
+    /// <returns>The description.</returns>
+    private static string Describe(Match m)
+    {
+        if (!m.Success)
+        {
+            return "no match";
+        }
+
+        var text = new System.Text.StringBuilder();
+        text.Append($"({m.Index}, {m.Index + m.Length}) {m.FuzzyCounts}");
+        text.Append($" s=[{string.Join(',', m.FuzzyChanges.Substitutions)}]");
+        text.Append($" i=[{string.Join(',', m.FuzzyChanges.Insertions)}]");
+        text.Append($" d=[{string.Join(',', m.FuzzyChanges.Deletions)}]");
+        for (int g = 1; g < m.Groups.Count; g++)
+        {
+            Group group = m.Groups[g];
+            text.Append($" g{g}={group.Success}:");
+            for (int c = 0; c < group.Captures.Count; c++)
+            {
+                text.Append($"({group.Captures[c].Index},{group.Captures[c].Length})");
+            }
+        }
+
+        return text.ToString();
+    }
 }

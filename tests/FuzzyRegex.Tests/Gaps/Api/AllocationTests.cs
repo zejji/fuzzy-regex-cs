@@ -35,6 +35,15 @@ public sealed class AllocationTests
     [Arguments("(?:amber lantern works){e<=2}", "nothing close to it here", FuzzyRegexOptions.IgnoreCase)]
     // D17: a repeat around a tested group, with no empty iteration, records no state.
     [Arguments(@"(a)(?:\1|b)*c", "abababac", FuzzyRegexOptions.None)]
+    // Item 10: the ranked modes, over a near miss, an exact hit and no match at all.
+    [Arguments("(?b)(?:haystack){e<=3}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
+    [Arguments("(?b)(?:haystack){e<=3}", "a needle in a haystack.", FuzzyRegexOptions.None)]
+    [Arguments("(?b)(?:haystack){e<=3}", "nothing close to it", FuzzyRegexOptions.None)]
+    [Arguments("(?b)(hay)(?:stack){e<=3}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
+    [Arguments("(?b)(?:haystack){1i+1d+2s<=4}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
+    [Arguments("(?e)(?:haystack){e<=3}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
+    [Arguments("(?e)(hay)(?:stack){e<=3}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
+    [Arguments("(?be)(?:haystack){e<=3}", "a needle in a haystakc.", FuzzyRegexOptions.None)]
     public void A_warm_IsMatch_allocates_nothing(string pattern, string subject, FuzzyRegexOptions options)
     {
         bool expected = false;
@@ -340,13 +349,14 @@ public sealed class AllocationTests
     /// how many groups are open at each keyed repeat; building the map of every node's open groups
     /// to answer that cost 7-12% of its compile allocation. The ceilings are the count-only walk's
     /// (Debug, JIT, 2026-11-06); the integration branch before it, e9c4161a, allocated 33,768 and
-    /// 112,920 B. Native AOT was not measured, so the test runs under the JIT only.
+    /// 112,920 B. Native AOT was not measured, so the test runs under the JIT only. Item 10 added
+    /// one reference field to the state the compile builds (<c>MatchState.RankedScratch</c>), 8 B.
     /// </summary>
     /// <param name="pattern">The pattern: a keyed lookaround and a capture group.</param>
     /// <param name="jitCeiling">The fix's bytes for one compile under the JIT, Debug.</param>
     [Test]
-    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_288)]
-    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_544)]
+    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_296)]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_552)]
     public void Compiling_a_pattern_with_a_keyed_lookaround_and_a_group_counts_open_groups_only(
         string pattern,
         long jitCeiling

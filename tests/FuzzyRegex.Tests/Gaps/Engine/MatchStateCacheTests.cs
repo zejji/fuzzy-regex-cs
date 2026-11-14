@@ -550,6 +550,15 @@ public sealed class MatchStateCacheTests
             case null when field.FieldType == typeof(CharacterIndex):
                 _ = state.GetCharacterIndex();
                 break;
+            case null when field.FieldType == typeof(Matcher.RankedScratch):
+                // Item 10: a ranked call's best-run storage, kept for the state's life; a reused
+                // state must empty its lists.
+                var scratch = new Matcher.RankedScratch { InUse = true };
+                scratch.BestList.Add(new BestEntry(7, 7, 7));
+                scratch.BestChangesList.Add([new FuzzyChange(1, 7)]);
+                scratch.BestFuzzyChanges.Add(new FuzzyChange(1, 7));
+                field.SetValue(state, scratch);
+                break;
             case null when field.FieldType == typeof(Matcher.AnchorBanSnapshot):
                 // D61's rule H' keeps one snapshot per state; a reused state must drop it.
                 field.SetValue(state, new Matcher.AnchorBanSnapshot { MatchPos = 7 });
@@ -604,6 +613,17 @@ public sealed class MatchStateCacheTests
             case ICollection { Count: 0 } and not Array:
             case HashSet<(long Key, int Reach)> { Count: 0 }:
             case CaptureTextIds { Count: 0 }:
+            // Item 10: so is a ranked call's storage once its lists are empty. Its saved groups and
+            // spare change lists are not compared: every ranked call overwrites them before it
+            // reads them, which FuzzyBestMatchTests.A_warm_ranked_call_answers_as_a_fresh_pattern_does
+            // pins.
+            case Matcher.RankedScratch
+            {
+                BestList.Count: 0,
+                BestChangesList.Count: 0,
+                BestFuzzyChanges.Count: 0,
+                InUse: false,
+            }:
             case long[] bestCounts
                 when string.Equals(path, nameof(MatchState.BestFuzzyCounts), StringComparison.Ordinal)
                     && Array.TrueForAll(bestCounts, static count => count == 0):
@@ -720,6 +740,13 @@ public sealed class MatchStateCacheTests
                 break;
             case Matcher.AnchorBanSnapshot snapshot:
                 lines.Add($"{path}=snapshot({snapshot.MatchPos},{snapshot.TextPos})");
+                break;
+            case Matcher.RankedScratch scratch:
+                // Item 10: one with empty lists renders as null above; this is one a reset missed.
+                RenderItems($"{path}.{nameof(scratch.BestList)}", scratch.BestList, lines);
+                lines.Add($"{path}.{nameof(scratch.BestChangesList)}.Count={scratch.BestChangesList.Count}");
+                RenderItems($"{path}.{nameof(scratch.BestFuzzyChanges)}", scratch.BestFuzzyChanges, lines);
+                lines.Add($"{path}.{nameof(scratch.InUse)}={scratch.InUse}");
                 break;
             default:
                 throw new InvalidOperationException(

@@ -129,6 +129,54 @@ internal struct FuzzyData
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 internal readonly record struct BestEntry(int MatchPos, int TextPos, int AttemptStart);
 
+/// <summary>
+/// Upstream <c>RE_BestChangesList</c> (<c>upstream/src/_regex.c</c> line 403): the errors each
+/// equal-best candidate in the best list used, entry <c>i</c> for candidate <c>i</c>.
+/// </summary>
+/// <remarks>
+/// NOT UPSTREAM'S, item 10: <see cref="Clear"/> keeps each list's storage where upstream's
+/// <c>clear_best_fuzzy_changes</c> (<c>:9831</c>) frees it, and the whole list lives in
+/// <see cref="Matcher.RankedScratch"/> rather than on one call's stack, so a warm BESTMATCH call
+/// allocates nothing for it. What it holds is the same: <see cref="Add"/> copies the live changes,
+/// as <c>add_best_fuzzy_changes</c> (<c>:9859</c>) does.
+/// </remarks>
+internal sealed class BestChangesList
+{
+    /// <summary>The lists, of which the first <see cref="Count"/> are live; the rest are spare storage.</summary>
+    private readonly List<List<FuzzyChange>> _lists = [];
+
+    /// <summary>Upstream <c>count</c>: how many lists are live.</summary>
+    internal int Count { get; private set; }
+
+    /// <summary>One live list.</summary>
+    /// <param name="index">Which, below <see cref="Count"/>.</param>
+    internal List<FuzzyChange> this[int index]
+    {
+        get
+        {
+            Debug.Assert(index < Count, "item 10: only a live list is read");
+            return _lists[index];
+        }
+    }
+
+    /// <summary>Upstream <c>clear_best_fuzzy_changes</c>, less the freeing.</summary>
+    internal void Clear() => Count = 0;
+
+    /// <summary>Upstream <c>add_best_fuzzy_changes</c>'s copy: appends a copy of <paramref name="changes"/>.</summary>
+    /// <param name="changes">The changes to copy.</param>
+    internal void Add(List<FuzzyChange> changes)
+    {
+        if (Count == _lists.Count)
+        {
+            _lists.Add([]);
+        }
+
+        List<FuzzyChange> copy = _lists[Count++];
+        copy.Clear();
+        copy.AddRange(changes);
+    }
+}
+
 internal static class MatchStatus
 {
     /// <summary>Upstream <c>RE_ERROR_SUCCESS</c>.</summary>
@@ -26049,22 +26097,53 @@ internal static class Matcher
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Upstream's whole function past the two <c>Py_MEMCPY</c>s is allocation: it reuses the buffer
-    /// the previous save returned and grows a group's capture array only when it has to
-    /// (<c>:17413-17440</c>). <see cref="GroupData.CopyGroups"/> already produces a snapshot holding
-    /// exactly the live spans, so this is the same shape as <see cref="SaveBestMatch"/> and reusing
-    /// the storage across runs is a Phase 7 question rather than a correctness one.
+    /// Upstream reuses the buffer the previous save returned and grows a group's capture array only
+    /// when it has to (<c>:17413-17440</c>), and so does this. NOT UPSTREAM'S, item 10: the buffer is
+    /// the state's (<see cref="RankedScratch.BestGroups"/>) rather than one call's, so it is reused
+    /// across calls too and a warm call allocates nothing; a capture array may then be longer than
+    /// its live spans, and <see cref="RestoreGroups"/> reads only the first <see cref="GroupData.Count"/>.
     /// </para>
     /// <para>
     /// NOT PORTED: <c>discard_groups</c> (<c>:17500</c>), which is upstream's <c>free</c> for the same
-    /// snapshot and has nothing to do on a garbage-collected heap. Dropping the reference is the
-    /// whole of it, so the call site says so in a comment rather than calling an empty method.
+    /// snapshot; the storage is kept for the next call instead, so the call site says so in a
+    /// comment rather than calling an empty method.
     /// </para>
     /// </remarks>
-    /// <param name="state">The match state.</param>
-    /// <returns>The snapshot.</returns>
-    private static GroupData[] SaveCaptures(MatchState state) =>
-        GroupData.CopyGroups(state.Groups, state.Groups.Length);
+    /// <param name="state">The match state, holding the storage in <see cref="MatchState.RankedScratch"/>.</param>
+    /// <returns>The snapshot, which is that storage.</returns>
+    private static GroupData[] SaveCaptures(MatchState state)
+    {
+        RankedScratch scratch = state.RankedScratch!;
+        GroupData[]? savedGroups = scratch.BestGroups;
+
+        if (savedGroups is null || savedGroups.Length != state.Groups.Length)
+        {
+            savedGroups = new GroupData[state.Groups.Length];
+            for (int g = 0; g < savedGroups.Length; g++)
+            {
+                savedGroups[g] = new GroupData();
+            }
+
+            scratch.BestGroups = savedGroups;
+        }
+
+        for (int g = 0; g < savedGroups.Length; g++)
+        {
+            GroupData orig = state.Groups[g];
+            GroupData copy = savedGroups[g];
+
+            if (orig.Count > copy.Captures.Length)
+            {
+                copy.Captures = new GroupSpan[orig.Count];
+            }
+
+            orig.Captures.AsSpan(0, orig.Count).CopyTo(copy.Captures);
+            copy.Count = orig.Count;
+            copy.Current = orig.Current;
+        }
+
+        return savedGroups;
+    }
 
     /// <summary>
     /// Upstream <c>restore_groups</c> (<c>upstream/src/_regex.c</c> line 17468), less its
@@ -26391,7 +26470,10 @@ internal static class Matcher
     {
         FuzzyCountBuffer bestFuzzyCountsBuffer = default;
         Span<long> bestFuzzyCounts = bestFuzzyCountsBuffer;
-        List<FuzzyChange> bestFuzzyChanges = [];
+
+        // Item 10: the state's storage, so a warm call allocates nothing. SaveFuzzyChanges clears it
+        // before it is read.
+        List<FuzzyChange> bestFuzzyChanges = state.RankedScratch!.BestFuzzyChanges;
 
         // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length. Upstream
         // measures 'available' ONCE, against the slice the caller asked for, and never recomputes it
@@ -26573,7 +26655,8 @@ internal static class Matcher
         {
             // Upstream's true branch here is 'discard_groups' (:17500) alone: the last run WAS the
             // best one and is already in the state, so there is nothing to put back and only the
-            // snapshot to free. Freeing it is going out of scope, so only the false branch is code.
+            // snapshot to free. The snapshot is the state's storage, kept for the next call (item
+            // 10), so only the false branch is code.
             if (status != MatchStatus.Success || state.TotalErrors != 0)
             {
                 // Restore the previous best match.
@@ -26604,19 +26687,18 @@ internal static class Matcher
     /// <c>lists[0]</c> back over the widened-slice re-run's changes.
     /// </para>
     /// <para>
-    /// NOT PORTED, because <see cref="List{T}"/> already is them: <c>init_best_changes_list</c>
-    /// (<c>:9822</c>), <c>fini_best_changes_list</c> (<c>:9848</c>) and
-    /// <c>clear_best_fuzzy_changes</c> (<c>:9831</c>), which are upstream's capacity bookkeeping and
-    /// its nested <c>safe_dealloc</c> over a list of lists. A collection expression is the first,
-    /// going out of scope is the second and <see cref="List{T}.Clear"/> is the third. The same
-    /// reasoning already applies to <c>init_fuzzy_changes_list</c> and its <c>fini</c> - see PORTMAP
-    /// row 417 - so this is the convention here rather than a new call.
+    /// NOT PORTED: <c>init_best_changes_list</c> (<c>:9822</c>) and <c>fini_best_changes_list</c>
+    /// (<c>:9848</c>), upstream's allocation and freeing of the list of lists. Since item 10 the list
+    /// is the state's (<see cref="RankedScratch.BestChangesList"/>), created once and kept, and
+    /// <c>clear_best_fuzzy_changes</c> (<c>:9831</c>) is <see cref="BestChangesList.Clear"/>, which
+    /// keeps the storage. The same reasoning already applies to <c>init_fuzzy_changes_list</c> and
+    /// its <c>fini</c> - see PORTMAP row 417.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="bestChangesList">The list of lists to add to.</param>
-    private static void AddBestFuzzyChanges(MatchState state, List<List<FuzzyChange>> bestChangesList) =>
-        bestChangesList.Add([.. state.FuzzyChanges]);
+    private static void AddBestFuzzyChanges(MatchState state, BestChangesList bestChangesList) =>
+        bestChangesList.Add(state.FuzzyChanges);
 
     /// <summary>What <see cref="BestWalkKnownToFail"/> found: nothing known, so run the search.</summary>
     private const int _walkSearchUnknown = 0;
@@ -26929,8 +27011,11 @@ internal static class Matcher
         bool mustAdvance = state.MustAdvance;
         bool foundMatch = false;
 
-        List<BestEntry> bestList = [];
-        List<List<FuzzyChange>> bestChangesList = [];
+        // Item 10: the state's storage, so a warm call allocates nothing. Each walk clears both
+        // before it adds to them.
+        RankedScratch scratch = state.RankedScratch!;
+        List<BestEntry> bestList = scratch.BestList;
+        BestChangesList bestChangesList = scratch.BestChangesList;
 
         int status = MatchStatus.Failure;
         int firstStartPos = state.TextPos;
@@ -27189,7 +27274,7 @@ internal static class Matcher
 
         FuzzyCountBuffer bestFuzzyCountsBuffer = default;
         Span<long> bestFuzzyCounts = bestFuzzyCountsBuffer;
-        List<FuzzyChange> bestFuzzyChanges = [];
+        List<FuzzyChange> bestFuzzyChanges = scratch.BestFuzzyChanges;
         GroupData[]? bestGroups = null;
         int bestMatchPos = 0;
         int bestTextPos = 0;
@@ -27618,6 +27703,43 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM'S, item 10: the storage <see cref="DoBestFuzzyMatch"/> and
+    /// <see cref="DoEnhancedFuzzyMatch"/> keep their best run in, held by the state
+    /// (<see cref="MatchState.RankedScratch"/>) so a warm call allocates nothing. Upstream allocates
+    /// each of these per call and frees it at the end. At most one ranked call is live on a state at
+    /// a time (<see cref="InUse"/>), and each call clears what it reads before it reads it.
+    /// </summary>
+    internal sealed class RankedScratch
+    {
+        /// <summary><see cref="DoBestFuzzyMatch"/>'s <c>best_list</c>.</summary>
+        internal readonly List<BestEntry> BestList = [];
+
+        /// <summary><see cref="DoBestFuzzyMatch"/>'s <c>best_changes_list</c>.</summary>
+        internal readonly BestChangesList BestChangesList = new();
+
+        /// <summary>Both functions' <c>best_fuzzy_changes</c>.</summary>
+        internal readonly List<FuzzyChange> BestFuzzyChanges = [];
+
+        /// <summary>Both functions' <c>best_groups</c> storage, which <see cref="SaveCaptures"/> fills.</summary>
+        internal GroupData[]? BestGroups;
+
+        /// <summary>Whether a ranked call is using this storage; only read by an assertion.</summary>
+        internal bool InUse;
+
+        /// <summary>
+        /// Empties the lists for a reused state (<see cref="MatchState.Init"/>), keeping their storage
+        /// and <see cref="BestGroups"/>, which <see cref="SaveCaptures"/> overwrites before any read.
+        /// </summary>
+        internal void Reset()
+        {
+            BestList.Clear();
+            BestChangesList.Clear();
+            BestFuzzyChanges.Clear();
+            InUse = false;
+        }
+    }
+
+    /// <summary>
     /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): which of the four match
     /// strategies a pattern gets.
     /// </summary>
@@ -27648,6 +27770,12 @@ internal static class Matcher
         // resume position, and the partial fallback pass and 'DoMatch2LiftingTheAnchorBan' read it
         // after this returns, so it goes back to what the caller set on every exit.
         bool mustAdvance = state.MustAdvance;
+
+        // Item 10: the two functions share this storage, which is sound only while no ranked call
+        // runs inside another on the same state.
+        RankedScratch scratch = state.RankedScratch ??= new RankedScratch();
+        Debug.Assert(!scratch.InUse, "item 10: one ranked call at a time on a state");
+        scratch.InUse = true;
         try
         {
             return (pattern.Flags & RegexFlags.BestMatch) != 0
@@ -27657,6 +27785,7 @@ internal static class Matcher
         finally
         {
             state.MustAdvance = mustAdvance;
+            scratch.InUse = false;
         }
     }
 
