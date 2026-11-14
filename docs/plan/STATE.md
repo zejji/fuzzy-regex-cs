@@ -47,5 +47,4 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** item 10 oracle 3 seeds then merge; item 15 (perf row triage), then item 14 (judge oracle rows). Transpositions:
-answers on the decision page (files `.scratch/decision-review/transpositions/`), then fold-back. Details: the brief.
+**Next action:** item 10 oracle then merge; item 14 builders back, review, merge; item 15 timing on a quiet machine. Transpositions: see the brief.
