@@ -209,14 +209,23 @@ internal static class PythonStr
                 continue;
             }
 
-            int expanding = Array.FindIndex(UnicodeLowercase.Expanding, entry => entry.From == codepoint);
-            if (expanding >= 0)
+            // A plain loop, not Array.FindIndex: its lambda captures the codepoint, so it cost a
+            // closure and a delegate per character of every full-case literal compiled (D29).
+            bool expanded = false;
+            foreach ((int from, int[] to) in UnicodeLowercase.Expanding)
             {
-                lowered.AddRange(UnicodeLowercase.Expanding[expanding].To);
-                continue;
+                if (from == codepoint)
+                {
+                    lowered.AddRange(to);
+                    expanded = true;
+                    break;
+                }
             }
 
-            lowered.Add(codepoint);
+            if (!expanded)
+            {
+                lowered.Add(codepoint);
+            }
         }
 
         return [.. lowered];

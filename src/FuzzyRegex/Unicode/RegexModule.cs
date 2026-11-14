@@ -24,6 +24,10 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </remarks>
 internal static class RegexModule
 {
+    private static readonly Lazy<int[][]> _expandedFolds = new(static () =>
+        [.. GetExpandOnFolding().Select(static c => FoldCase(RegexFlags.FullCaseFolding, [c]))]
+    );
+
     private static readonly Lazy<int[]> _expandOnFolding = new(static () =>
     {
         uint[] table = UnicodeTables.ExpandOnFolding;
@@ -87,6 +91,16 @@ internal static class RegexModule
     /// </summary>
     /// <returns>The codepoints, in upstream's table order.</returns>
     internal static IReadOnlyList<int> GetExpandOnFolding() => _expandOnFolding.Value;
+
+    /// <summary>
+    /// The full fold of each of <see cref="GetExpandOnFolding"/>'s codepoints, in the same order:
+    /// upstream's <c>[_regex.fold_case(FULL_CASE_FOLDING, c) for c in
+    /// _regex.get_expand_on_folding()]</c>, which <c>Sequence._fix_full_casefold</c> and
+    /// <c>Branch._is_folded</c> rebuild on every call. It depends on nothing but the tables, so
+    /// it is built once (D29: the rebuild was half of an ignore-case fuzzy literal's compile).
+    /// </summary>
+    /// <returns>One folded codepoint array per expanding codepoint. Callers must not change them.</returns>
+    internal static IReadOnlyList<int[]> GetExpandedFolds() => _expandedFolds.Value;
 
     /// <summary>
     /// Upstream <c>has_property_value</c> (line 26327): whether a codepoint has a given value for
