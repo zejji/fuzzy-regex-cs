@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-14 18:40 by Claude Code (item 12 closed: not worth doing, measured).
+**Updated:** 2026-11-14 20:15 by Claude Code (D157 merged 42703928; item 10 committing).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -14,7 +14,7 @@ measurement, WPR profiles and benchmarks.
 | 1-7 | D138-D145, D141 rework, D135 (integration) | `perf/phase11-integration` 2c45e127 | merged to main 2026-11-06 (owner), pushed | - |
 | 8 | Grouped fuzzy repeats (D154) | `perf/item8-required-literal` | merged to main 579d0644 2026-11-14 (gates in the D154 row; oracle rows D156-D158 identical on main), not pushed | - |
 | 9 | D29 + D135 compile allocation | `perf/d29-expanded-folds` | D135 merged; D29 part 2 merged to main 441c8d8d (ignore-case compile 33,904 to 17,816 B) | remaining D29 bytes spread thin; judge after item 10 |
-| 10 | `(?b)` 544 B per call | `perf/item10-bestmatch-alloc`, worktree `item10` | builder (Opus) started 18:10 | gates, merge |
+| 10 | `(?b)` 544 B per call (D159) | `perf/item10-bestmatch-alloc`, worktree `item10` | built: warm (?b) IsMatch 512 to 0 B; ratchet GREEN 10,298; differential identical to main | commit (running), oracle 3 seeds, merge |
 | 11 | Myers on short subjects | - | done: keep the scan (`2026-11-06-myers-short-subjects.md`: skipping it is 21-59x slower on a short near miss) | - |
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
@@ -43,7 +43,6 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** builder on item 10 (Opus subagent; ask it for status before inferring); transpositions cross-check running (Fable; Junie PID 5108). D157:
-ratchet PID 6244 (`.scratch/d157/ratchet.log`), then commit (`.scratch/d157/msg.txt`), merge. Transpositions:
-page http://127.0.0.1:62013/; set-usage study running; then cross-check T10-8 and T10-12, API overview, owner
-answers, fold-back. AC sleep Never since 15:50 (restore to 30). Main ahead of origin; push needs the owner.
+**Next action:** item 10: commit on its branch (running), oracle 3 seeds (pattern `.scratch/d29/oracle.ps1`),
+merge. Transpositions: page http://127.0.0.1:62013/ (T10-12, T10-17 rewritten; T10-8 now C); then API overview,
+owner answers, fold-back. AC sleep Never since 15:50 (restore to 30). Main ahead of origin; push needs the owner.
