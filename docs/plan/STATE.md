@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-14 20:40 by Claude Code (session handover; brief `.claude/driver/next-session-brief-2026-11-14.md`).
+**Updated:** 2026-11-14 21:00 by Claude Code (item 10 oracle running; brief `.claude/driver/next-session-brief-2026-11-14.md`).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -34,6 +34,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
+- Item 10 oracle, 3 seeds: pwsh PID 46096, script `.scratch/item10/oracle.ps1`, log `.scratch/item10/oracle.log` (ends `EXIT n`). Seed 20261114 rows D156-D158 also on main; then merge with a ratchet on the merged tree.
 - AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
 - Deferred defects: D134, D136, D137, D142, D146-D149, D151-D153. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
