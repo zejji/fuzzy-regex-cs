@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-14 17:05 by Claude Code (D29 re-ratchet; transpositions blind reviews running).
+**Updated:** 2026-11-14 17:45 by Claude Code (D29 committed 7bfe59d2, oracle running; Astra gap run).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -43,8 +43,8 @@ measurement, WPR profiles and benchmarks.
 - Transpositions design (`2026-11-05-transpositions-design.md` section 10): 10.1-10.6, 10.13, 10.15,
   10.16 decided; 10.8-10.12, 10.14, 10.17 have recommendations awaiting answers. Parked post-1.3.
 
-**Next action:** (1) D29: ratchet PID 23036 (`.scratch/d29/ratchet-20261114c.log`), then commit
-(message `.scratch/d29/msg.txt`), oracle, merge. (2) D157 branch `test/d157-oracle-row` needs a ratchet before
-its commit (message `.scratch/d157/msg.txt`). (3) Transpositions: owner answering via decision-review page;
-blind reviews (Fable subagent; Junie gpt-6-astra PID 44740, output `oracle-main/.scratch/research/
-blind-review-astra.md`) to compare with the recommendations. AC sleep Never since 15:50 (restore to 30).
+**Next action:** (1) D29 oracle PID 14692 (`.scratch/d29/oracle.log`): if only rows main shares (D156-D158),
+merge `perf/d29-expanded-folds` 7bfe59d2. (2) D157 branch needs a ratchet, then commit (`.scratch/d157/msg.txt`),
+merge. (3) Transpositions: page http://127.0.0.1:62013/; Junie astra gap run PID 2592 (writes oracle-main/
+.scratch/research/blind-review-astra.md) then refresh its page section (add_reviews.py in the scratchpad).
+AC sleep Never since 15:50 (restore to 30). Main ahead of origin; push needs the owner.
