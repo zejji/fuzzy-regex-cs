@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-15 04:00 by Claude Code (D105 second part ratchet GREEN, commit stopped by low memory; owner asleep).
+**Updated:** 2026-11-15 11:05 by Claude Code (D105 fully merged, D118 closed; paused for the owner).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,7 +19,7 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | D105: `perf/d105-nesting-compile`, worktree `d105` | D105 inliner part merged to main aa04c939 2026-11-15 (500-group compile Release 95.8 to 24.4 ms; flaky timing test now counts nodes surveyed; ratchet GREEN 10,301; compiled output identical to main on 47,307 patterns) | D105 second part built on `perf/d105-required-width` (worktree `d105b`): `Info.GroupWidths` keeps each group's width during the required-string pass; 500-group compile 22.6 to 9.7 ms Release; outputs identical to main on 47,307 compiles; ratchet running; then commit, ff main, push; then re-measure the other eight |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68, D82: re-measure in a timing window; then pick the next fix: recommended D116 (design note with options first) |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -36,10 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- `d105b`: ratchet GREEN 10,302 (`.scratch/d105b/ratchet.log`); changes staged, uncommitted. The commit was stopped mid-inspection by Claude Code's low-memory guard (machine at 2 GB free, peer session building); orphaned inspection killed, lock removed. Re-run when the owner says: in `d105b`, take the lock, `git commit -F ../../../.scratch/d105b/commit-msg.txt` at >= 12 GB free, rebase on main, ff main, push. Also adds D118's guard test.
-- Item 15 re-measures written up in `.scratch/item15/remeasure_rows.py` (D71, D99, D116, D123: all unchanged since v1.2.0, still open); apply to KNOWN-DEFECTS after the d105b merge. D68, D82 need a timing window; D33 pinned.
-- Peer session future-ide busy with builds/tests until ~07:00; it messages "quiet now, 20 min" at a gap; no timing otherwise. AC sleep Never overnight; restore 30 min in the morning.
-- AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
+- Nothing running. AC sleep 30 min (restored 2026-11-15). Timing only in a quiet window agreed with any peer session (ListAgents, SendMessage).
 - Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
@@ -47,4 +44,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** owner: OK to re-run the d105b commit; then ff, push, apply item 15 notes; item 15 other eight rows (timing only in a quiet window from the peer session); checkpoint every 30 min; summary for the owner by 07:40.
+**Next action:** item 15: D68 and D82 timing re-measure (needs a quiet window), or start the D116 design note (options and costs first, no code) if no window; owner may redirect.
