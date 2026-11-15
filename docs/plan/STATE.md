@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-15 00:00 by Claude Code (item 14 merged a4201953; D105 builder starting).
+**Updated:** 2026-11-15 01:00 by Claude Code (D105 committing; owner asleep, autonomous until morning).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,7 +19,7 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | D105: `perf/d105-nesting-compile`, worktree `d105` | D105 first: its test flakes (500-group compile 245 ms Release on main and v1.2.0, not 20 ms); builder running, brief `.claude/driver/brief-d105-nesting-compile-2026-11-14.md` | D105, then re-measure the other eight on a quiet machine |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | D105: `perf/d105-nesting-compile`, worktree `d105` | D105 built: CallInliner surveys each nested group once (500-group compile Release 95.8 to 24.4 ms, inliner 76 to 3 ms); flaky timing test now counts nodes surveyed; ratchet GREEN 10,301; compiled output identical to main on 47,307 patterns | commit (running, log `.scratch/d105/commit.log`), ff main, push; then D105 rest (`CallGroup.GetRequiredString` recomputes `MaxWidth` per call, `Nodes.cs:2151`); then re-measure the other eight |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -36,7 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D105 builder (Opus subagent) in worktree `d105`. Main is 4 commits ahead of origin: push after D105's test is fixed and the ratchet is GREEN (a4201953's ratchet: 10,297/10,298, the D105 flake).
+- D105 commit in worktree `d105` (pre-commit inspections, holds `.scratch/s1024/commit.lock`); if the lock is left with no git process, check `git -C .claude/worktrees/d105 log -1`, rmdir the lock, re-run `git commit -F .scratch/d105/commit-msg.txt` at >= 11 GB free. Main is 5 ahead of origin; owner allowed pushing main (2026-11-14). AC sleep Never overnight; restore 30 min in the morning.
 - AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
 - Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
@@ -45,4 +45,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** D105 builder back, review, merge, ratchet, push; then item 15's other eight rows.
+**Next action:** finish the D105 commit, ff main to it, push; D105 rest (MaxWidth per call); item 15's other eight rows on the quiet overnight machine; checkpoint every 30 min; summary for the owner by 07:40.
