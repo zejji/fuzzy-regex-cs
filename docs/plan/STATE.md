@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-15 03:15 by Claude Code (D105 second part ratcheting; owner asleep, autonomous until morning).
+**Updated:** 2026-11-15 04:00 by Claude Code (D105 second part ratchet GREEN, commit stopped by low memory; owner asleep).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,7 +36,8 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Ratchet on `d105b`: PID 25940, log `.scratch/d105b/ratchet.log`; GREEN then commit under the lock (message to write), ff main, push.
+- `d105b`: ratchet GREEN 10,302 (`.scratch/d105b/ratchet.log`); changes staged, uncommitted. The commit was stopped mid-inspection by Claude Code's low-memory guard (machine at 2 GB free, peer session building); orphaned inspection killed, lock removed. Re-run when the owner says: in `d105b`, take the lock, `git commit -F ../../../.scratch/d105b/commit-msg.txt` at >= 12 GB free, rebase on main, ff main, push. Also adds D118's guard test.
+- Item 15 re-measures written up in `.scratch/item15/remeasure_rows.py` (D71, D99, D116, D123: all unchanged since v1.2.0, still open); apply to KNOWN-DEFECTS after the d105b merge. D68, D82 need a timing window; D33 pinned.
 - Peer session future-ide busy with builds/tests until ~07:00; it messages "quiet now, 20 min" at a gap; no timing otherwise. AC sleep Never overnight; restore 30 min in the morning.
 - AC sleep 30 min normally; set Never for overnight runs and restore (owner 2026-11-06).
 - Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
@@ -46,4 +47,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** D105 second part: ratchet, commit, ff, push; item 15 other eight rows (timing only in a quiet window from the peer session); checkpoint every 30 min; summary for the owner by 07:40.
+**Next action:** owner: OK to re-run the d105b commit; then ff, push, apply item 15 notes; item 15 other eight rows (timing only in a quiet window from the peer session); checkpoint every 30 min; summary for the owner by 07:40.
