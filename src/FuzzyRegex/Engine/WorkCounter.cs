@@ -174,6 +174,14 @@ internal static class WorkCounter
     internal static long LeftRecursionReads { get; private set; }
 
     /// <summary>
+    /// D105: group bodies whose widest match <c>Parsing.Group.MaxWidth</c> walked on this thread,
+    /// while compiling. The required-string pass measures the called group at every call; walking
+    /// each group again for every call around it would make this quadratic in the nesting depth.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long GroupWidthsMeasured { get; private set; }
+
+    /// <summary>
     /// The most keys the records written after a blocked end held at once in one pass on this
     /// thread (<c>MatchState.CutBodyKeyCap</c>), so a test can see how near a pattern runs to the cap.
     /// </summary>
@@ -330,6 +338,10 @@ internal static class WorkCounter
     /// <summary>Counts one node the left-recursion refusal asked whether it can match empty.</summary>
     [Conditional("DEBUG")]
     internal static void LeftRecursionRead() => LeftRecursionReads++;
+
+    /// <summary>Counts one group body whose widest match was walked.</summary>
+    [Conditional("DEBUG")]
+    internal static void GroupWidthMeasured() => GroupWidthsMeasured++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

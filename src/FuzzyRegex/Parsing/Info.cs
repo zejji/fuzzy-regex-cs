@@ -171,6 +171,14 @@ internal sealed class Info
     /// </summary>
     internal Dictionary<int, (Group Group, bool Reverse, bool Fuzzy)> DefinedGroups { get; } = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S (D105): each group's widest match, kept while the required-string pass runs
+    /// (<see cref="PatternCompiler"/>), where <see cref="CallGroup.GetRequiredString"/> measures the
+    /// called group at every call. Keyed by node, as a branch reset gives two groups one number;
+    /// <see langword="null"/> outside that pass, when the tree can still change.
+    /// </summary>
+    internal Dictionary<Group, long>? GroupWidths { get; set; }
+
     /// <summary>The group calls found in the pattern. Upstream <c>info.group_calls</c>.</summary>
     internal List<(RegexBase Call, bool Reverse, bool Fuzzy)> GroupCalls { get; } = [];
 

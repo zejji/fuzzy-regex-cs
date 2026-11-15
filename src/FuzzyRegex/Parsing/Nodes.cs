@@ -2148,13 +2148,16 @@ internal sealed class CallGroup : RegexBase
     /// unlimited, since <see cref="MaxWidth"/> stays so, which also covers recursion; so is
     /// <c>(?R)</c>, which has no defining group.
     /// </remarks>
-    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) =>
-        (
-            _info.DefinedGroups.TryGetValue(GroupNumber, out var defined)
-                ? defined.Group.MaxWidth()
-                : RegexFlags.Unlimited,
-            null
-        );
+    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse)
+    {
+        if (!_info.DefinedGroups.TryGetValue(GroupNumber, out var defined))
+        {
+            return (RegexFlags.Unlimited, null);
+        }
+
+        _info.GroupWidths ??= new Dictionary<Group, long>(ReferenceEqualityComparer.Instance);
+        return (defined.Group.MaxWidth(), null);
+    }
 
     /// <inheritdoc />
     internal override string RenderKey() =>
@@ -4190,7 +4193,24 @@ internal sealed class Group : RegexBase
     internal override bool HasSimpleStart() => Subpattern.HasSimpleStart();
 
     /// <inheritdoc />
-    internal override long MaxWidth() => Subpattern.MaxWidth();
+    /// <remarks>
+    /// NOT UPSTREAM'S (D105): during the required-string pass a group's width is kept in
+    /// <see cref="Info.GroupWidths"/>, so a chain of nested groups that call each other walks each
+    /// body once rather than once per call around it.
+    /// </remarks>
+    internal override long MaxWidth()
+    {
+        Dictionary<Group, long>? widths = _info.GroupWidths;
+        if (widths is not null && widths.TryGetValue(this, out long width))
+        {
+            return width;
+        }
+
+        Engine.WorkCounter.GroupWidthMeasured();
+        width = Subpattern.MaxWidth();
+        widths?[this] = width;
+        return width;
+    }
 
     /// <inheritdoc />
     internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) =>

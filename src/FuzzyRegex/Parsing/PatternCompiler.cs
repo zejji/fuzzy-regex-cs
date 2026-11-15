@@ -460,6 +460,7 @@ internal static class PatternCompiler
             info.Flags,
             info.UpstreamCallFeatures
         );
+        info.GroupWidths = null;
 
         // Build the named lists.
         Dictionary<string, IReadOnlySet<string>> namedListsBuilt = new(StringComparer.Ordinal);

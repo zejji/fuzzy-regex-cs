@@ -300,6 +300,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<FilterNoMatchTails>k__BackingField",
                 "WorkCounter.<FilterStartsHeldBack>k__BackingField",
                 "WorkCounter.<FramesCut>k__BackingField",
+                "WorkCounter.<GroupWidthsMeasured>k__BackingField",
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<LeadingStringFallbacks>k__BackingField",

@@ -324,9 +324,11 @@ public sealed class LeftRecursionRefusalTests
     /// <c>WorkCounter</c>), which no load can change. Measured 2026-11-15 at 500 groups: the check
     /// asks 19,163 nodes whether they can match empty (9,530 at 250, so linear); the inliner's
     /// survey reads 11,131 nodes (5,539 at 250), where before the D105 fix it read 2,364,350
-    /// (579,027 at 250). Each bound is about 1.3 times the measured count, and the quadratic loops
-    /// exceed it a hundredfold. The compile itself then took 62 ms in Debug and 24 ms
-    /// in Release, from 257 ms and 96 ms (best of many, pinned to performance cores).
+    /// (579,027 at 250). The required-string pass measures 499 group bodies (249 at 250), where
+    /// before it walked the called group at every call, 124,684 (D105, second part). Each bound is
+    /// about 1.3 times the measured count, and the quadratic loops exceed it a hundredfold. After
+    /// the inliner fix the compile took 62 ms in Debug and 24 ms in Release, from 257 ms and 96 ms
+    /// (best of many, pinned to performance cores).
     /// </remarks>
     [Test]
     [Category(EngineWork.Category)]
@@ -347,10 +349,13 @@ public sealed class LeftRecursionRefusalTests
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
         }
 
-        (long reads, long surveyed) = WorkToCompile(text.Append('x').ToString());
+        (long reads, long surveyed, long widths) = WorkToCompile(text.Append('x').ToString());
 
         reads.Should().BeLessThan(25_000, "the left-recursion check reads each node a bounded number of times");
         surveyed.Should().BeLessThan(15_000, "the inliner surveys each group once, not once per group around it");
+        widths
+            .Should()
+            .BeLessThan(650, "the required-string pass measures each group once, not once per call around it");
     }
 
     /// <summary>
@@ -378,7 +383,7 @@ public sealed class LeftRecursionRefusalTests
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
         }
 
-        (_, long surveyed) = WorkToCompile(text.Append('x').ToString());
+        (_, long surveyed, _) = WorkToCompile(text.Append('x').ToString());
 
         surveyed
             .Should()
@@ -386,14 +391,40 @@ public sealed class LeftRecursionRefusalTests
     }
 
     /// <summary>
+    /// D118: a chain of numbered calls that does not nest, each group calling the next,
+    /// <c>(a(?2))(a(?3))...(a)</c>, so the 500-level limit does not apply. On 2026-10-19 its compile
+    /// grew about cubically, 2.8 s at 1,000 calls and 20 s at 2,000. Measured 2026-11-15 (Debug
+    /// <c>WorkCounter</c>): the inliner's survey reads 192,861 nodes at 2,000 calls (94,861 at 1,000,
+    /// 45,861 at 500, so linear) and the left-recursion check 11,940 (5,940 at 1,000); v1.2.0 already
+    /// compiled 1,000 calls in 22 ms (Debug, indicative). Each bound is about 1.3 times the count.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_chain_of_two_thousand_calls_that_does_not_nest_compiles_in_linear_work()
+    {
+        EngineWork.SkipUnlessCounting();
+
+        System.Text.StringBuilder text = new();
+        for (int i = 1; i < 2_000; i++)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(a(?{i + 1}))");
+        }
+
+        (long reads, long surveyed, _) = WorkToCompile(text.Append("(a)").ToString());
+
+        reads.Should().BeLessThan(16_000, "the left-recursion check reads each node a bounded number of times");
+        surveyed.Should().BeLessThan(250_000, "the inliner surveys each group a bounded number of times");
+    }
+
+    /// <summary>
     /// Compiles a deeply nested pattern and counts the work of the left-recursion check and of the
-    /// call inliner's survey.
+    /// call inliner's survey, and the group bodies the required-string pass measured.
     /// </summary>
     /// <param name="pattern">The pattern.</param>
-    /// <returns>The nodes the check read and the nodes the survey read.</returns>
-    private static (long Reads, long Surveyed) WorkToCompile(string pattern)
+    /// <returns>The nodes the check read, the nodes the survey read and the group bodies measured.</returns>
+    private static (long Reads, long Surveyed, long Widths) WorkToCompile(string pattern)
     {
-        (long Reads, long Surveyed) work = default;
+        (long Reads, long Surveyed, long Widths) work = default;
         System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
 
         // The parser recurses once per nesting level, deeper than a test thread's stack allows in
@@ -403,6 +434,7 @@ public sealed class LeftRecursionRefusalTests
             {
                 long reads = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LeftRecursionReads;
                 long surveyed = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.NodesSurveyed;
+                long widths = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.GroupWidthsMeasured;
                 try
                 {
                     _ = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
@@ -414,7 +446,8 @@ public sealed class LeftRecursionRefusalTests
 
                 work = (
                     Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LeftRecursionReads - reads,
-                    Fuzzy.Text.RegularExpressions.Engine.WorkCounter.NodesSurveyed - surveyed
+                    Fuzzy.Text.RegularExpressions.Engine.WorkCounter.NodesSurveyed - surveyed,
+                    Fuzzy.Text.RegularExpressions.Engine.WorkCounter.GroupWidthsMeasured - widths
                 );
             },
             64 * 1024 * 1024
