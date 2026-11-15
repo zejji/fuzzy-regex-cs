@@ -186,6 +186,7 @@ internal static class LeftRecursion
         bool Nullable(RegexBase node)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack(); // D110: recursion per nesting level.
+            Engine.WorkCounter.LeftRecursionRead();
             if (memo is not null && memo.TryGetValue(node, out bool known))
             {
                 return known;

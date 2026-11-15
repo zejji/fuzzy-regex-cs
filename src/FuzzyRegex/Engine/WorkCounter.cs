@@ -158,6 +158,22 @@ internal static class WorkCounter
     internal static long LookaroundFoldVisits { get; private set; }
 
     /// <summary>
+    /// D105: tree nodes the call inliner's survey of called bodies (<c>Parsing.CallInliner</c>) read
+    /// on this thread, while compiling. A survey that read a group again for every group around it
+    /// would make this quadratic in the nesting depth.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long NodesSurveyed { get; private set; }
+
+    /// <summary>
+    /// Nodes the left-recursion refusal (<c>Parsing.LeftRecursion</c>) asked whether they can match
+    /// empty, on this thread, while compiling. A check that read every body again on each round of
+    /// its fixpoint would make this quadratic in the nesting depth.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long LeftRecursionReads { get; private set; }
+
+    /// <summary>
     /// The most keys the records written after a blocked end held at once in one pass on this
     /// thread (<c>MatchState.CutBodyKeyCap</c>), so a test can see how near a pattern runs to the cap.
     /// </summary>
@@ -306,6 +322,14 @@ internal static class WorkCounter
     /// <summary>Counts one node the lookaround fold visited.</summary>
     [Conditional("DEBUG")]
     internal static void LookaroundFoldVisited() => LookaroundFoldVisits++;
+
+    /// <summary>Counts one node the call inliner's survey read.</summary>
+    [Conditional("DEBUG")]
+    internal static void NodeSurveyed() => NodesSurveyed++;
+
+    /// <summary>Counts one node the left-recursion refusal asked whether it can match empty.</summary>
+    [Conditional("DEBUG")]
+    internal static void LeftRecursionRead() => LeftRecursionReads++;
 
     /// <summary>Counts one <see cref="MatchState.Init"/>.</summary>
     [Conditional("DEBUG")]

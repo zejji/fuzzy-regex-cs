@@ -107,6 +107,40 @@ public sealed class CallInliningTests
     }
 
     /// <summary>
+    /// D105: the inliner keeps the survey of each group written inside a called body, and forgets
+    /// it when a call inside that group is replaced by its copy, since the copy holds no groups.
+    /// Here the first call's plan surveys group x while it still holds the call of d, whose body
+    /// sets y; then that call is copied, and q's plan reads x again. Read afresh, x sets no y, so q's
+    /// body, which reads y, sets nothing it reads and is copied: three calls written out. Read from
+    /// the kept survey, x would still set y, and q's call would stay (two).
+    /// </summary>
+    [Test]
+    public void A_group_whose_call_was_copied_is_surveyed_again()
+    {
+        var regex = new FuzzyRegex(@"(?&p)(?<q>(?<p>(?<x>(?&d)))(?P=y))(?&q)(?<d>(?<y>e))");
+
+        regex.InlinedCalls.Should().Be(3);
+    }
+
+    /// <summary>
+    /// D105: the inliner keeps a group's survey by node, not by number, because a branch reset
+    /// gives two groups one number. The second group a reads c, which o's own body sets, so o's
+    /// copy would read the caller's c instead of its own, and o's call stays. Kept by number, the
+    /// second a would take the first's survey, which reads nothing, and o would be copied: over
+    /// 'aabb' the copy's c would read the first o's 'a' and miss the 'bb', answering None (measured
+    /// 2026-11-15 with that change), where the call reads its own 'b'. Python regex 2026.9.29 also
+    /// answers (0, 4).
+    /// </summary>
+    [Test]
+    public void Two_groups_that_share_a_number_are_surveyed_apart()
+    {
+        var regex = new FuzzyRegex(@"(?<o>(?<c>.)(?|(?<a>z)|(?<a>(?P=c))))(?&o)");
+
+        regex.InlinedCalls.Should().Be(0);
+        Answer(regex.Match("aabb")).Should().Be("F(0, 4)");
+    }
+
+    /// <summary>
     /// A pattern whose every call is written out compiles to exactly the code of the same pattern
     /// with each call written out by hand: in a reverse pattern, in a lookbehind, in a fuzzy
     /// section, with groups inside the called group, through a call inside a called group, and with

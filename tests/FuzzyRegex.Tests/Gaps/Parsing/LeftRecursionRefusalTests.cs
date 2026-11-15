@@ -310,19 +310,30 @@ public sealed class LeftRecursionRefusalTests
     }
 
     /// <summary>
-    /// The check is linear in the pattern. A chain of nested groups, each calling the one inside
-    /// it, needs a group's answer before its parent's; reading every body again on each round of
-    /// the fixpoint took 20.3 s at 1,000 groups (blind review, 2026-10-08), and 10-16 s in a Release
-    /// build with that loop put back (2026-10-18). The chain is now 500 groups, the most the parser
-    /// allows (D110), where that quadratic loop would cost about a quarter as much: 2.5 s or more.
-    /// The whole compile takes about 20 ms alone at 500 (Release and Debug, 2026-10-19), and at
-    /// 1,000 it took up to 2.3 s alongside the rest of the suite, about 0.6 s scaled to 500, so the
-    /// test runs on its own and the bound sits between the two.
+    /// The check is linear in the pattern, and so is the call inliner's survey of the called bodies.
+    /// A chain of nested groups, each calling the one inside it, needs a group's answer before its
+    /// parent's; reading every body again on each round of the fixpoint took 20.3 s at 1,000 groups
+    /// (blind review, 2026-10-08), and 10-16 s in a Release build with that loop put back
+    /// (2026-10-18). The chain is now 500 groups, the most the parser allows (D110).
     /// </summary>
+    /// <remarks>
+    /// Until 2026-11-15 this test bounded the compile at 2 s of wall-clock time, on the premise that
+    /// it took about 20 ms. It took 245 ms in Release (2026-11-14, best of 3), because the inliner
+    /// read every group again for every group around it (D105), and the bound failed in two of
+    /// three ratchets on a busy machine. It now counts the nodes each pass reads (Debug
+    /// <c>WorkCounter</c>), which no load can change. Measured 2026-11-15 at 500 groups: the check
+    /// asks 19,163 nodes whether they can match empty (9,530 at 250, so linear); the inliner's
+    /// survey reads 11,131 nodes (5,539 at 250), where before the D105 fix it read 2,364,350
+    /// (579,027 at 250). Each bound is about 1.3 times the measured count, and the quadratic loops
+    /// exceed it a hundredfold. The compile itself then took 62 ms in Debug and 24 ms
+    /// in Release, from 257 ms and 96 ms (best of many, pinned to performance cores).
+    /// </remarks>
     [Test]
-    [NotInParallel]
+    [Category(EngineWork.Category)]
     public void Five_hundred_nested_groups_that_call_each_other_compile_quickly()
     {
+        EngineWork.SkipUnlessCounting();
+
         // (?<g1>(?<g2>...(?<g500>)(?&g500))...(?&g2))x
         System.Text.StringBuilder text = new();
         for (int i = 1; i < 500; i++)
@@ -336,24 +347,82 @@ public sealed class LeftRecursionRefusalTests
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
         }
 
-        string pattern = text.Append('x').ToString();
-        TimeSpan elapsed = TimeSpan.MaxValue;
+        (long reads, long surveyed) = WorkToCompile(text.Append('x').ToString());
+
+        reads.Should().BeLessThan(25_000, "the left-recursion check reads each node a bounded number of times");
+        surveyed.Should().BeLessThan(15_000, "the inliner surveys each group once, not once per group around it");
+    }
+
+    /// <summary>
+    /// The inliner keeps the survey of a group that cannot be copied as well (D105): here every
+    /// group holds a call of the whole pattern, so none can be. Measured 2026-11-15 at 499 groups:
+    /// 2,987 nodes surveyed (1,487 at 249); before the D105 fix 373,251 (92,876 at 249), and the
+    /// same with only the copyable surveys kept. The bound is about 1.3 times the measured count.
+    /// </summary>
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_chain_of_groups_that_cannot_be_copied_is_surveyed_once()
+    {
+        EngineWork.SkipUnlessCounting();
+
+        // (?<g1>(?<g2>...(?<g499>a(?R)?)(?&g499))...(?&g2))x
+        System.Text.StringBuilder text = new();
+        for (int i = 1; i < 499; i++)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?<g{i}>");
+        }
+
+        text.Append("(?<g499>a(?R)?)");
+        for (int i = 498; i >= 1; i--)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture, $"(?&g{i + 1}))");
+        }
+
+        (_, long surveyed) = WorkToCompile(text.Append('x').ToString());
+
+        surveyed
+            .Should()
+            .BeLessThan(4_000, "a group that cannot be copied is surveyed once, not once per group around it");
+    }
+
+    /// <summary>
+    /// Compiles a deeply nested pattern and counts the work of the left-recursion check and of the
+    /// call inliner's survey.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns>The nodes the check read and the nodes the survey read.</returns>
+    private static (long Reads, long Surveyed) WorkToCompile(string pattern)
+    {
+        (long Reads, long Surveyed) work = default;
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
 
         // The parser recurses once per nesting level, deeper than a test thread's stack allows in
-        // a Debug build, so the compile runs on a thread of its own.
+        // a Debug build, so the compile runs on a thread of its own. The counts are per thread.
         Thread compile = new(
             () =>
             {
-                var watch = System.Diagnostics.Stopwatch.StartNew();
-                _ = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
-                elapsed = watch.Elapsed;
+                long reads = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LeftRecursionReads;
+                long surveyed = Fuzzy.Text.RegularExpressions.Engine.WorkCounter.NodesSurveyed;
+                try
+                {
+                    _ = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout);
+                }
+                catch (FuzzyRegexParseException e)
+                {
+                    failure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e);
+                }
+
+                work = (
+                    Fuzzy.Text.RegularExpressions.Engine.WorkCounter.LeftRecursionReads - reads,
+                    Fuzzy.Text.RegularExpressions.Engine.WorkCounter.NodesSurveyed - surveyed
+                );
             },
             64 * 1024 * 1024
         );
         compile.Start();
         compile.Join();
-
-        elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+        failure?.Throw();
+        return work;
     }
 
     /// <summary>

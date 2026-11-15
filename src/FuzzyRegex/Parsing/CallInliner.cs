@@ -56,7 +56,11 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// </para>
 /// <para>
 /// Cost: one walk of the tree, plus one analysis of each called group's body, memoised, plus the
-/// copies themselves, which the cap bounds.
+/// copies themselves, which the cap bounds. The analysis of a group written inside a called body
+/// is memoised too (D105): without it, each of the n groups in a chain like
+/// <c>(?&lt;g1&gt;(?&lt;g2&gt;...(?&amp;g3))(?&amp;g2))</c> read every group nested in it again, and merged
+/// every nested call's sets again, so 500 groups took 2,364,350 node visits and 20,557,244 set
+/// additions.
 /// </para>
 /// </remarks>
 internal static class CallInliner
@@ -194,6 +198,22 @@ internal static class CallInliner
     {
         private readonly Dictionary<int, Plan> _plans = [];
         private readonly HashSet<int> _planning = [];
+
+        /// <summary>
+        /// The survey of each group written in the tree, kept so that the plan of every group
+        /// around it reads it once rather than again (D105). Keyed by node, not number: two groups
+        /// can share a number. A copyable survey is the same in every context: it met no recursion
+        /// and read only plans already in <see cref="_plans"/>, which <see cref="PlanFor"/> returns
+        /// before it looks for one. A survey that cannot be copied stays so in every context, so
+        /// the plan of every group around it cannot be copied either: one that met a recursion lies
+        /// on a cycle of calls, and the plans along a cycle are never copyable. Only its depth
+        /// and size depend on the context, and a plan that cannot be copied uses neither.
+        /// </summary>
+        /// <remarks>Made on first use: most patterns with calls nest no group in a called body.</remarks>
+        private Dictionary<Group, Plan>? _surveyed;
+
+        /// <summary>The groups around the node <see cref="Rewrite"/> is at, outermost first.</summary>
+        private readonly List<Group> _path = [];
         private long _allowance = allowance;
 
         /// <summary>The calls replaced by copies.</summary>
@@ -223,11 +243,35 @@ internal static class CallInliner
 
                 _allowance -= plan.Size;
                 Copied.Add(call);
+                Changed();
                 return Copy(call.GroupNumber);
+            }
+
+            if (node is Group group)
+            {
+                _path.Add(group);
+                RewriteChildren(node, child => Rewrite(child, depth + 1));
+                _path.RemoveAt(_path.Count - 1);
+                return node;
             }
 
             RewriteChildren(node, child => Rewrite(child, depth + 1));
             return node;
+        }
+
+        /// <summary>
+        /// Forgets the kept surveys of the groups around a call about to be replaced by its copy,
+        /// since a survey of the copy reads differently: it holds no groups. The innermost group
+        /// first: a kept survey implies one for every group inside it, so the first group without
+        /// one ends the search.
+        /// </summary>
+        private void Changed()
+        {
+            int i = _path.Count - 1;
+            while (i >= 0 && _surveyed?.Remove(_path[i]) == true)
+            {
+                i--;
+            }
         }
 
         /// <summary>
@@ -310,6 +354,7 @@ internal static class CallInliner
         /// <returns>What it found.</returns>
         private Survey SurveyOf(RegexBase node, HashSet<int> sets, HashSet<int> reads, int depthAllowance)
         {
+            Engine.WorkCounter.NodeSurveyed();
             if (depthAllowance <= 0)
             {
                 return new Survey(false, 0, 0, Cut: true);
@@ -325,8 +370,7 @@ internal static class CallInliner
                 case CallGroup call:
                     return SurveyOfCall(call, sets, reads, depthAllowance);
                 case Group group:
-                    sets.Add(group.GroupNumber);
-                    break;
+                    return SurveyOfGroup(group, sets, reads, depthAllowance);
                 case RefGroup reference:
                     reads.Add(reference.GroupNumber);
                     break;
@@ -360,6 +404,50 @@ internal static class CallInliner
             }
 
             return new Survey(copyable, size, depth + 1, Cut: false);
+        }
+
+        /// <summary>
+        /// <see cref="SurveyOf"/> for a group written in the tree, through <see cref="_surveyed"/>.
+        /// A kept survey is cut exactly when its depth exceeds the allowance, as a fresh one would
+        /// be: a leaf needs an allowance of 1, a node one more than its deepest child, and a call
+        /// its plan's depth (<see cref="SurveyOfCall"/>).
+        /// </summary>
+        /// <param name="group">The group.</param>
+        /// <param name="sets">The groups the copy would set, added to.</param>
+        /// <param name="reads">The groups the copy reads, added to.</param>
+        /// <param name="depthAllowance">How deep the group's copy may be.</param>
+        /// <returns>What it found.</returns>
+        private Survey SurveyOfGroup(Group group, HashSet<int> sets, HashSet<int> reads, int depthAllowance)
+        {
+            _surveyed ??= new(ReferenceEqualityComparer.Instance);
+            if (!_surveyed.TryGetValue(group, out Plan? kept))
+            {
+                HashSet<int> ownSets = [group.GroupNumber];
+                HashSet<int> ownReads = [];
+                Survey body = SurveyOf(group.Subpattern, ownSets, ownReads, depthAllowance - 1);
+                if (body.Cut)
+                {
+                    return body;
+                }
+
+                long size = Math.Min(long.MaxValue / 2, body.Size + 1);
+                kept = new Plan(body.Copyable, size, body.Depth + 1, ownSets, ownReads);
+                _surveyed[group] = kept;
+            }
+
+            if (!kept.Copyable)
+            {
+                return new Survey(false, kept.Size, kept.Depth, Cut: false);
+            }
+
+            if (kept.Depth > depthAllowance)
+            {
+                return new Survey(false, 0, 0, Cut: true);
+            }
+
+            sets.UnionWith(kept.Sets);
+            reads.UnionWith(kept.Reads);
+            return new Survey(true, kept.Size, kept.Depth, Cut: false);
         }
 
         /// <summary><see cref="SurveyOf"/> for a call: the called group's plan stands in its place.</summary>
