@@ -98,4 +98,20 @@ public sealed class OpenDefectTests
 
         (m.Success, m.PartialMatch, m.Index, m.Index + m.Length).Should().Be((true, true, 1, 2));
     }
+
+    // D160 (found 2026-11-06 by the transpositions blind review, measured 2026-11-16 alongside
+    // D155). A reversed match reports a substitution's and an insertion's position one too high:
+    // the index of the character after the one the edit touched. A change position is a text index
+    // and the same text was edited, so it cannot depend on the direction the pattern reads; a
+    // deletion's position already agrees. regex 2026.9.29 and the port answer alike: (?r)(?:ab){i<=1}
+    // over 'a1b' insertions [2] (forward [1]); (?r)(?:abc){s<=1} over 'adc' substitutions [2]
+    // (forward [1]); (?r)(?:abc){e<=1} over 'abc1' insertions [4], past the end of the text.
+    [Test]
+    public void A_reversed_match_reports_the_position_of_the_character_it_edited()
+    {
+        new FuzzyRegex("(?r)(?:ab){i<=1}").FullMatch("a1b").FuzzyChanges.Insertions.Should().Equal(1);
+        new FuzzyRegex("(?r)(?:abc){s<=1}").FullMatch("adc").FuzzyChanges.Substitutions.Should().Equal(1);
+        new FuzzyRegex("(?r)(?:abc){e<=1}").FullMatch("abc1").FuzzyChanges.Insertions.Should().Equal(3);
+        new FuzzyRegex("(?r)(?:abc){d<=1}").FullMatch("ac").FuzzyChanges.Deletions.Should().Equal(1);
+    }
 }

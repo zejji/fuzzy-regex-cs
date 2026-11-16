@@ -3112,6 +3112,21 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>fuzzy-test-without-an-upstream-arm-allows-every-error</c> (D155), recorded
+    /// 2026-11-16 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/d155-fuzzy-test-arm-rows.jsonl</c>: a
+    /// reversed set test with one substitution and with two, a set test in a lookbehind, a <c>.</c>
+    /// test over a newline, and a set test inside a full-case folding.
+    /// </summary>
+    private const string _fuzzyTestArmRows = """
+        {"generator": "rows", "pattern": "(?r)(?:abc){s<=1:[xy]}", "flags": 0, "namedLists": {}, "subject": "adc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)\\A(?:tesco){e<=2:[xyz]}\\Z", "flags": 0, "namedLists": {}, "subject": "tecso", "operation": "search", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [4, 3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [4, 3], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?<=(?:[ab][cd]){e<=1:[0-9x]})$", "flags": 0, "namedLists": {}, "subject": "azc", "operation": "search", "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?:[ab][cd]){e<=1:.}", "flags": 0, "namedLists": {}, "subject": "a\nc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": []}}, "leakFreeFuzzy": [null]}
+        {"generator": "rows", "pattern": "(?fi)(\u00df)(?:\\1){e<=1:[sq]}", "flags": 0, "namedLists": {}, "subject": "\u00dfsx", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        """;
+
+    /// <summary>
     /// The rows of <c>called-copy-keeps-the-groups-close-order</c> (D125), recorded 2026-11-02 by
     /// <c>python tools/record-oracle.py --rows tools/probes/d125-copy-end-index-rows.jsonl</c>: a
     /// call in a lookbehind of a forward pattern, in a lookahead of a reverse pattern, in a fuzzy
@@ -3946,6 +3961,28 @@ internal static class ExpectedDivergences
             Example: _negativeTestCaptureRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamConditionalTests(row))
+        ),
+        // Before D125's: every named ablation has this switch on as well, and its own ablation turns
+        // D125's switch off, so it claims only the rows D155 alone explains and D125's claims the rest.
+        new(
+            Id: "fuzzy-test-without-an-upstream-arm-allows-every-error",
+            Reason: "PORT RIGHT, D155 (ledger entry 99): a fuzzy test (the `:[...]` after a constraint) "
+                + "says which characters an error may touch, and upstream's `fuzzy_ext_match` "
+                + "(`_regex.c:9938`) and `fuzzy_ext_match_group_fld` (`:10033`) have no arm for a "
+                + "reversed set (`SET_*_REV`, `SET_*_IGN_REV`), for a set inside a full-case folding "
+                + "(`SET_*_IGN` in the second), or for `.` (ANY, ANY_ALL, ANY_U), so those tests fall "
+                + "off the switch to `return TRUE` and allow every error. `(?r)(?:abc){s<=1:[xy]}` "
+                + "fullmatches 'adc' upstream, which forward and `[x]` refuse. This port has the arms "
+                + "(`Matcher.FuzzyExtMatch`, `Matcher.FuzzyExtMatchGroupFld`).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamFuzzyTestArms`, which sets "
+                + "`PatternObject.UpstreamFuzzyTestArms` (with the switches every named ablation "
+                + "stacks), reproduces upstream's recorded answer exactly, AND this port's live answer "
+                + "is the one being judged.",
+            PinnedBy: "Gaps.Engine.ReverseEditTestTests",
+            Example: _fuzzyTestArmRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamFuzzyTestArms(row))
         ),
         // Before every named ablation entry, after the switches that run alone (D51, D52, D54):
         // every named ablation has this switch on as well, so after them any of them would claim a

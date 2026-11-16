@@ -252,6 +252,7 @@ public sealed class DivergenceRemarksTests
             "fuzzy section semantics"
         ),
         ("A fuzzy section that is undone takes its error total with it", "fuzzy section semantics"),
+        ("A fuzzy test means the same characters reversed, inside a full-case folding", "fuzzy constraint syntax"),
         (
             "A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it",
             "fuzzy section semantics"

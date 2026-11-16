@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-16 22:15 by Claude Code (D116 merged to main; D155 gates running).
+**Updated:** 2026-11-16 23:30 by Claude Code (D116 and D155 merged to main; push next, then D68/D82 timing).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,13 +36,13 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D116 merged to main (F148), ratchet GREEN 10,314; to push with the next GREEN ratchet.
-- Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
+- D116 merged to main (F148). D155 merged (branch 1a788b76; oracle 3 seeds only D161/D162, identical on main). Push after the merge ratchet.
+- Deferred defects: D134, D136, D137, D142. New: D160 (reverse change positions, red [Explicit] test), D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** overnight per DECISIONS 2026-11-16: D116 note -> build if high confidence -> merge if green;
-push main after a GREEN ratchet; D68/D82 timing in a quiet window (peers asked); then D155. Checkpoint at 99% weekly.
+**Next action:** ratchet the D155 merge, commit, push main (owner mandate); then D68/D82 timing (both peers done,
+quiet window); checkpoint at 99% weekly, cswap switch 2 (this session owns the switch).
