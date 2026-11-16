@@ -44,4 +44,5 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** item 15: D68 and D82 timing re-measure (needs a quiet window), or start the D116 design note (options and costs first, no code) if no window; owner may redirect.
+**Next action:** overnight per DECISIONS 2026-11-16: D116 note -> build if high confidence -> merge if green;
+push main after a GREEN ratchet; D68/D82 timing in a quiet window (peers asked); then D155. Checkpoint at 99% weekly.
