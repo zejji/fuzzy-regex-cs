@@ -36,7 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D116 option E builder (subagent) in worktree `d116`, branch `perf/d116-exact-lookbehind`; note committed 627afcdf. Peers squiggle-mockups and future-ide asked for a quiet window (timing waits for both). AC sleep 30 min (restored 2026-11-15). Timing only in a quiet window agreed with any peer session (ListAgents, SendMessage).
+- D116 option E builder (subagent) in worktree `d116`, branch `perf/d116-exact-lookbehind`; note committed 627afcdf. D155 builder (subagent) in worktree `d155`, branch `fix/d155-reverse-edit-tests`. Timing (D68/D82) waits: future-ide runs builds for several more hours (its message 20:20); squiggle-mockups will message when done. AC sleep 30 min (restored 2026-11-15). Timing only in a quiet window agreed with any peer session (ListAgents, SendMessage).
 - Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
