@@ -1216,8 +1216,22 @@ internal sealed class PatternObject
     }
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy test whose opcode upstream's
+    /// <c>fuzzy_ext_match</c> or <c>fuzzy_ext_match_group_fld</c> has no arm for (a reversed set,
+    /// a set inside a folding, <c>.</c>) allows every error, as upstream's does (D155). The oracle
+    /// sets it on a pattern it compiled for an ablation, since upstream has none of this port's
+    /// fixes. See <c>Matcher.FuzzyExtMatch</c>.
+    /// </summary>
+    internal bool UpstreamFuzzyTestArms
+    {
+        get => (_oracleSwitches & OracleSwitches.UpstreamFuzzyTestArms) != OracleSwitches.None;
+        set => SetOracleSwitch(OracleSwitches.UpstreamFuzzyTestArms, value);
+    }
+
+    /// <summary>
     /// The oracle-only switches <see cref="UpstreamConditionalRestore"/>,
-    /// <see cref="MaximaAsBeforeD133"/> and <see cref="UpstreamCopyEndIndex"/>, in one byte: a bool
+    /// <see cref="MaximaAsBeforeD133"/>, <see cref="UpstreamCopyEndIndex"/> and
+    /// <see cref="UpstreamFuzzyTestArms"/>, in one byte: a bool
     /// field of its own for D133 grew every compiled pattern by 8 bytes (<c>AllocationTests</c>,
     /// 2026-11-02).
     /// </summary>
@@ -1244,6 +1258,9 @@ internal sealed class PatternObject
 
         /// <summary><see cref="UpstreamCopyEndIndex"/>.</summary>
         UpstreamCopyEndIndex = 4,
+
+        /// <summary><see cref="UpstreamFuzzyTestArms"/>.</summary>
+        UpstreamFuzzyTestArms = 8,
     }
 
     /// <summary>

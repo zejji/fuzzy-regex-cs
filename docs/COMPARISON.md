@@ -1515,6 +1515,28 @@ var unrolled = new FuzzyRegex(@"(?e)(?:a+(?:ab|a)){d<=1}(?:(?:a+(?:ab|a)){d<=1})
 Console.WriteLine(unrolled.Match("xaaabaxa").Value);   // aaab - upstream: aaaba, with two deletions
 ```
 
+### A fuzzy test means the same characters reversed, inside a full-case folding, and as `.`
+
+A test after a fuzzy constraint, such as the `[xy]` in `{s<=1:[xy]}`, limits which characters an
+edit may bring into the match. Upstream checks it only for the kinds of item it has a case for. A
+set of two or more separate characters in a reversed pattern, a set tested inside a full-case-folded
+backreference, and `.` have none, so there the test lets every character through. Here a test means
+the same characters whichever way the pattern runs.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Forward and reversed alike refuse a substitution that brings in "d", which is not in [xy].
+Console.WriteLine(FuzzyRegex.FullMatch("adc", @"(?r)(?:abc){s<=1:[xy]}").Success);   // False - upstream: True
+
+// "." does not match a newline, so it does not let one in either.
+Console.WriteLine(FuzzyRegex.FullMatch("a\nc", @"(?:[ab][cd]){e<=1:.}").Success);    // False - upstream: True
+```
+
+A test that is a single character or a single range, such as `[x]` or `[x-z]`, already behaved the
+same on both, because upstream compiles it to an item it does check. There is no option to restore
+the upstream answer.
+
 ### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
 Inside a repeat, a fuzzy pattern can match nothing at all by leaving out every character of the

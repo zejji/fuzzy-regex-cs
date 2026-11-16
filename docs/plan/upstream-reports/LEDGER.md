@@ -7594,3 +7594,53 @@ the counter still moves, as `BuildLookaround` reads it). `GroupInfo.CopyEndIndex
 value and `PatternObject.UpstreamCopyEndIndex` makes `lastindex` read it, for the oracle (entry
 `called-copy-keeps-the-groups-close-order`; every named ablation stacks it). Pinned by
 `Gaps/Engine/CalledCopyTests`.
+
+
+## 99. A fuzzy test allows every edit when it is a reversed set, a set inside a full-case folding, or `.` - DIVERGES HERE (D155, 2026-11-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D155, found 2026-11-06 by the
+transpositions blind review. Evidence: `tools/probes/d155-fuzzy-test-arm-rows.jsonl`;
+`tests/FuzzyRegex.Tests/Gaps/Engine/ReverseEditTestTests.cs`, `FuzzyTestConstraintTests.cs`.
+
+**Reproduction**, `regex` 2026.9.29 on Python 3.14, measured 2026-11-16:
+
+```
+fullmatch(r'(?r)(?:abc){s<=1:[xy]}', 'adc')     -> (0, 3), one substitution   here None
+fullmatch(r'(?r)(?:abc){s<=1:[pq]}', 'adc')     -> (0, 3), one substitution   here None
+fullmatch(r'(?r)(?:abc){s<=1:[x]}', 'adc')      -> None                       in both
+fullmatch(r'(?r)(?:abc){s<=1:[x-z]}', 'adc')    -> None                       in both
+fullmatch(r'(?:abc){s<=1:[xy]}', 'adc')         -> None                       in both
+fullmatch(r'(?r)\A(?:tesco){e<=2:[xyz]}\Z', 'tecso')  -> (0, 5), two substitutions   here None
+fullmatch(r'(?:[ab][cd]){e<=1:.}', 'a\nc')      -> (0, 3), inserts the newline  here None
+fullmatch(r'(?fi)(ß)(?:\1){e<=1:[sq]}', 'ßsx')  -> (0, 3), substitutes 'x'      here None
+fullmatch(r'(?fi)(ß)(?:\1){e<=1:q}', 'ßsx')     -> None                       in both
+```
+
+**Why upstream is wrong.** README.rst (the fuzzy section): `{e<=1:[a-z]}` limits the errors to
+characters the test matches. A set is the same set whichever way the text is read, and a fullmatch
+of the whole text has no direction, so `(?r)` must accept exactly what forward accepts; upstream's
+own `[x]`, `[x-z]` and `\d` tests, which compile to CHARACTER, RANGE and PROPERTY, do. `.` means
+"not a newline" (`parse_fuzzy_test`, `_regex_core.py:820`, builds ANY, ANY_ALL under DOTALL, ANY_U
+under WORD, so the distinction is intended), and a set inside a full-case folding means the same set
+as outside it.
+
+**Mechanism.** `fuzzy_ext_match` (`_regex.c:9938`) has arms for CHARACTER, PROPERTY and RANGE in all
+four forms, but for the sets only `SET_*` and `SET_*_IGN`: no `SET_*_REV` or `SET_*_IGN_REV`.
+`fuzzy_ext_match_group_fld` (`:10033`) has no `SET_*_IGN` either, which is the only set form that
+reaches it (it runs only under `(?fi)`). Neither lists ANY, ANY_ALL or ANY_U. An opcode with no arm
+falls off the end of the switch to `return true`. `Fuzzy.compile` (`_regex_core.py:2859`) compiles
+the test with the section's direction, so a reversed pattern's set test is always a `_REV` opcode. A
+one-character or one-range set optimises to CHARACTER or RANGE, which is why `[x]` and `[x-z]` test.
+
+**Proposed fix upstream:** add the missing cases, the `_REV` ones reading `pos - 1` against
+`slice_start` as the reversed CHARACTER arm does, and ANY / ANY_U testing as `match_many_ANY` and
+`match_many_ANY_U` do.
+
+**This port.** That fix (`Matcher.FuzzyExtMatch`, `Matcher.FuzzyExtMatchGroupFld`, with
+`Matcher.TestAllows` for ANY). `PatternObject.UpstreamFuzzyTestArms` takes the arms away for the
+oracle (entry `fuzzy-test-without-an-upstream-arm-allows-every-error`; every named ablation stacks
+it).
+
+**Not the same defect:** a reversed match reports a substitution's and an insertion's position one
+too high in both engines (`(?r)(?:ab){i<=1}` over 'a1b': insertion at [2], forward [1]; known defect
+D160, open).

@@ -18,12 +18,13 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// because a deletion touches no subject character at all.
 /// </para>
 /// <para>
-/// <b>Two of upstream's switches are asymmetric, and the tests below pin both.</b>
+/// <b>Two of upstream's switches are incomplete, and this port fills them in (D155).</b>
 /// <c>fuzzy_ext_match</c> lists <c>SET_*</c> and <c>SET_*_IGN</c> but no <c>SET_*_REV</c> or
-/// <c>SET_*_IGN_REV</c>, and <c>fuzzy_ext_match_group_fld</c> lists no <c>SET_*_IGN</c> either. An
-/// opcode with no arm falls off the end of the switch to <c>return TRUE</c>, so those tests
-/// constrain nothing. A test that is not a character class at all - <c>.</c> compiles to ANY - is a
-/// no-op everywhere for the same reason.
+/// <c>SET_*_IGN_REV</c>, <c>fuzzy_ext_match_group_fld</c> lists no <c>SET_*_IGN</c> either, and
+/// neither lists ANY, which <c>.</c> compiles to. An opcode with no arm falls off the end of the
+/// switch to <c>return TRUE</c>, so upstream's tests of those shapes constrain nothing. The rows
+/// below that say "upstream" quote what it answers and assert this port's answer, which is the one
+/// the same test gives where upstream has the arm.
 /// </para>
 /// </remarks>
 public sealed class FuzzyTestConstraintTests
@@ -152,18 +153,35 @@ public sealed class FuzzyTestConstraintTests
     }
 
     [Test]
-    public void A_test_that_is_not_a_character_class_constrains_nothing()
+    public void A_dot_test_refuses_an_error_on_a_character_dot_does_not_match()
     {
-        // '.' compiles to ANY, which fuzzy_ext_match's switch does not list, so the function falls
-        // through to `return TRUE` and the constraint allows every error - including one on a
-        // newline, which ANY itself would not match.
+        // '.' compiles to ANY, which upstream's fuzzy_ext_match does not list, so it falls through
+        // to `return TRUE` and allows an error on a newline, which ANY itself would not match.
+        // upstream any-noop: span=(0, 3) group='a\nc' counts=(0, 1, 0) changes=([], [1], [])
+        // Here (D155) ANY tests as '.' matches: not a newline, unless DOTALL makes it ANY_ALL.
+        new FuzzyRegex("(?:[ab][cd]){e<=1:.}")
+            .FullMatch("a\nc")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("(?r)(?:[ab][cd]){e<=1:.}").FullMatch("a\nc").Success.Should().BeFalse();
 
-        // any-noop: span=(0, 3) group='a\nc' counts=(0, 1, 0) changes=([], [1], [])
-        Match m = new FuzzyRegex("(?:[ab][cd]){e<=1:.}").FullMatch("a\nc");
+        Match m = new FuzzyRegex("(?:[ab][cd]){e<=1:.}").FullMatch("axc");
 
         m.Success.Should().BeTrue();
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
         m.FuzzyChanges.Insertions.Should().Equal(1);
+
+        new FuzzyRegex("(?s)(?:[ab][cd]){e<=1:.}").FullMatch("a\nc").Success.Should().BeTrue();
+        new FuzzyRegex("(?sr)(?:[ab][cd]){e<=1:.}").FullMatch("a\nc").Success.Should().BeTrue();
+
+        // Under WORD, '.' is ANY_U, which refuses every line separator, U+2028 among them.
+        new FuzzyRegex("(?w)(?:[ab][cd]){e<=1:.}")
+            .FullMatch("a\u2028c")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("(?wr)(?:[ab][cd]){e<=1:.}").FullMatch("a\u2028c").Success.Should().BeFalse();
+        new FuzzyRegex("(?w)(?:[ab][cd]){e<=1:.}").FullMatch("axc").Success.Should().BeTrue();
+        new FuzzyRegex("(?wr)(?:[ab][cd]){e<=1:.}").FullMatch("axc").Success.Should().BeTrue();
     }
 
     [Test]
@@ -255,22 +273,30 @@ public sealed class FuzzyTestConstraintTests
     }
 
     [Test]
-    public void A_reversed_set_test_constrains_nothing_because_upstream_has_no_arm_for_it()
+    public void A_reversed_set_test_tests_as_it_does_forward()
     {
-        // fuzzy_ext_match lists SET_DIFF..SET_UNION and their _IGN forms but no _REV or _IGN_REV
-        // form, so a reversed set test falls through to `return TRUE`. Forward, '[0-9x]' refuses a
-        // substitution on 'z'; reversed, it permits it - which is how these two rows differ from the
-        // reversed CHARACTER, RANGE and PROPERTY rows above.
-
-        // set-rev-noop: counts=(1, 0, 0) changes=([2], [], [])
+        // Upstream's fuzzy_ext_match lists SET_DIFF..SET_UNION and their _IGN forms but no _REV or
+        // _IGN_REV form, so a reversed set test falls through to `return TRUE` and permits the
+        // substitution on 'z' that forward '[0-9x]' refuses.
+        // upstream set-rev-noop and set-ign-rev-noop: counts=(1, 0, 0) changes=([2], [], [])
+        // Here (D155) the arm exists, so these answer as the reversed CHARACTER rows above do: the
+        // substitution is refused and the match deletes instead.
         new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:[0-9x]})$")
             .Match("azc")
             .FuzzyCounts.Should()
-            .Be(new FuzzyCounts(1, 0, 0));
-
-        // set-ign-rev-noop: counts=(1, 0, 0) changes=([2], [], [])
+            .Be(new FuzzyCounts(0, 0, 1));
         new FuzzyRegex("(?i)(?<=(?:[ab][cd]){e<=1:[0-9x]})$")
             .Match("aZc")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(0, 0, 1));
+
+        // A character in the set is still allowed.
+        new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:[0-9x]})$")
+            .Match("a5c")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(1, 0, 0));
+        new FuzzyRegex("(?i)(?<=(?:[ab][cd]){e<=1:[0-9x]})$")
+            .Match("aXc")
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(1, 0, 0));
     }
@@ -302,17 +328,19 @@ public sealed class FuzzyTestConstraintTests
     }
 
     [Test]
-    public void A_case_insensitive_set_test_inside_a_folding_constrains_nothing()
+    public void A_case_insensitive_set_test_inside_a_folding_tests_as_it_does_outside()
     {
-        // fuzzy_ext_match_group_fld lists SET_DIFF..SET_UNION but no SET_*_IGN, so under (?fi) - the
-        // only way to reach the function at all - a set test has no arm and returns TRUE. '[sq]' does
-        // not contain 'x', and the substitution on 'x' is permitted anyway.
+        // Upstream's fuzzy_ext_match_group_fld lists SET_DIFF..SET_UNION but no SET_*_IGN, so under
+        // (?fi) - the only way to reach the function at all - a set test has no arm and returns TRUE.
+        // upstream gfld ...{e<=1:[sq]} 'ßsx': counts=(1, 0, 0) changes=([2], [], [])
+        // Here (D155) the arm exists: '[sq]' does not contain 'x', so it refuses as 's' does.
+        Fold("[sq]", "ßsx").Success.Should().BeFalse();
+        Fold("[sx]", "ßsx").Success.Should().BeTrue();
 
-        // gfld ...{e<=1:[sq]} 'ßsx': counts=(1, 0, 0) changes=([2], [], [])
-        Match m = Fold("[sq]", "ßsx");
-
-        m.Success.Should().BeTrue();
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        // '.' (ANY) has no arm there either: upstream gfld ...{e<=1:.} 'ßs\n': span=(0, 3)
+        // counts=(1, 0, 0) changes=([2], [], []), the substitution on a newline. Here it refuses.
+        Fold(".", "ßs\n").Success.Should().BeFalse();
+        Fold(".", "ßsx").Success.Should().BeTrue();
     }
 
     [Test]
@@ -366,8 +394,18 @@ public sealed class FuzzyTestConstraintTests
         // node->match is FALSE.
         RefusedRev("[^x]");
 
-        // '[sq]' is a real SET_UNION_IGN_REV, which has no arm in either switch.
-        FoldRev("[sq]").Success.Should().BeTrue();
+        // '[sq]' is a real SET_UNION_IGN_REV, which has no arm in either of upstream's switches,
+        // so upstream answers (0, 3) with a substitution; here (D155) it refuses as 's' does.
+        RefusedRev("[sq]");
+        FoldRev("[sx]").Success.Should().BeTrue();
+
+        // ANY_REV likewise: upstream gfld-rev ...{e<=1:.} 's\nß': span=(0, 3) counts=(1, 0, 0),
+        // the substitution on a newline; here '.' refuses it and the D24 deletion is what is left.
+        FoldRev(".").Success.Should().BeTrue();
+        Match newline = new FuzzyRegex(@"(?fir)(?:\1){e<=1:.}(\N{LATIN SMALL LETTER SHARP S})").Match("s\nß");
+
+        (newline.Index, newline.Length).Should().Be((2, 1));
+        newline.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     private static void RefusedRev(string test)

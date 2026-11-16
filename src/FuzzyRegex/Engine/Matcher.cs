@@ -10158,13 +10158,15 @@ internal static class Matcher
     /// <c>{...:test}</c>, has a test node and reaches the switch.
     /// </para>
     /// <para>
-    /// <b>Upstream's switch has no <c>SET_*_REV</c> or <c>SET_*_IGN_REV</c> arm</b>, where it has
-    /// both forward set arms and the reversed CHARACTER, PROPERTY and RANGE ones. An opcode the
-    /// switch does not list falls off the end to <c>return TRUE</c>, so a reversed set test - and
-    /// any test that is not a character class at all, such as <c>.</c>, which compiles to ANY -
-    /// constrains nothing. That is upstream's behaviour, measured, not an omission here:
-    /// <c>tools/probes/upstream-fuzzy-ext-test.py</c>, and
-    /// <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c> pins it.
+    /// <b>NOT UPSTREAM (D155): upstream's switch has no <c>SET_*_REV</c>, <c>SET_*_IGN_REV</c> or
+    /// ANY arm</b>, where it has both forward set arms and the reversed CHARACTER, PROPERTY and
+    /// RANGE ones. An opcode the switch does not list falls off the end to <c>return TRUE</c>, so
+    /// upstream's reversed set test, and its <c>.</c> test (ANY, ANY_ALL or ANY_U), constrains
+    /// nothing: <c>(?r)(?:abc){s&lt;=1:[xy]}</c> fullmatches 'adc', which forward refuses. This
+    /// port adds the missing arms, so a test means the same characters in either direction (ledger
+    /// entry 99). <see cref="PatternObject.UpstreamFuzzyTestArms"/> takes them away for the oracle.
+    /// Pinned by <c>Gaps/Engine/ReverseEditTestTests.cs</c> and
+    /// <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c>.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -10207,8 +10209,58 @@ internal static class Matcher
             or Opcode.RangeRev
             or Opcode.RangeIgnRev => pos > state.SliceStart
                 && MatchesOne(testNode.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
-            _ => true,
+
+            // NOT UPSTREAM (D155): the arms upstream's switch lacks; see the remarks.
+            Opcode.Any or Opcode.AnyAll or Opcode.AnyU => state.Pattern.UpstreamFuzzyTestArms
+                || (pos < state.SliceEnd && TestAllows(testNode, state.CharAt(pos))),
+            Opcode.SetDiffRev
+            or Opcode.SetInterRev
+            or Opcode.SetSymDiffRev
+            or Opcode.SetUnionRev
+            or Opcode.SetDiffIgnRev
+            or Opcode.SetInterIgnRev
+            or Opcode.SetSymDiffIgnRev
+            or Opcode.SetUnionIgnRev
+            or Opcode.AnyRev
+            or Opcode.AnyAllRev
+            or Opcode.AnyURev => state.Pattern.UpstreamFuzzyTestArms
+                || (pos > state.SliceStart && TestAllows(testNode, state.CharBefore(pos))),
+            _ => AnUnlistedTestAllowsEverything(testNode),
         };
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D155): whether a fuzzy test node allows an error on <paramref name="ch"/>, for
+    /// the opcodes upstream's <c>fuzzy_ext_match</c> and <c>fuzzy_ext_match_group_fld</c> have no
+    /// arm for. ANY and ANY_U are not <see cref="MatchesOne"/> opcodes and ignore
+    /// <c>node-&gt;match</c>, as <see cref="MatchesMany"/> does; every other test node is a
+    /// character class and answers through <see cref="MatchesOne"/>.
+    /// </summary>
+    /// <param name="testNode">The test node.</param>
+    /// <param name="ch">The character the error would touch.</param>
+    /// <returns><see langword="true"/> if the test allows it.</returns>
+    private static bool TestAllows(Node testNode, uint ch) =>
+        testNode.Op switch
+        {
+            Opcode.Any or Opcode.AnyRev => MatchesAny(ch),
+            Opcode.AnyAll or Opcode.AnyAllRev => true,
+            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(testNode.Encoding, ch),
+            _ => MatchesOne(testNode.Encoding, testNode, ch) == testNode.Match,
+        };
+
+    /// <summary>
+    /// Upstream's <c>return TRUE</c> after the switch in <c>fuzzy_ext_match</c> and
+    /// <c>fuzzy_ext_match_group_fld</c>. Since D155 every opcode a test can compile to has an arm:
+    /// <c>parse_fuzzy_test</c> (<c>_regex_core.py:820</c>) accepts <c>.</c>, a set or an escape,
+    /// and the escapes that are not one character (<c>\X</c>, <c>\b</c>, <c>\A</c>, <c>\Z</c>, a
+    /// named list) are refused when the pattern is compiled (<c>NodeGraphTests.RejectedFuzzyTests</c>).
+    /// </summary>
+    /// <param name="testNode">The test node.</param>
+    /// <returns><see langword="true"/>, as upstream.</returns>
+    private static bool AnUnlistedTestAllowsEverything(Node testNode)
+    {
+        Debug.Assert(false, $"D155: every fuzzy test opcode has an arm, but {testNode.Op} reached the default");
+        return true;
     }
 
     /// <summary>Upstream <c>next_fuzzy_match_item</c> (line 10116).</summary>
@@ -13624,12 +13676,14 @@ internal static class Matcher
     /// position indexes into the folding, not into the subject.
     /// </para>
     /// <para>
-    /// <b>This switch is missing the <c>SET_*_IGN</c> arms that <see cref="FuzzyExtMatch"/> has</b>,
-    /// as well as the <c>SET_*_REV</c> ones neither has. Since the function runs only when both
-    /// sides are being full-case-folded - which needs <c>(?f)</c> with <c>(?i)</c> - every test node
-    /// reaching it is an <c>_IGN</c> one, so a set test here always falls off the end of the switch
-    /// to <see langword="true"/> and constrains nothing, where the same test forward would bite.
-    /// Measured, and pinned by <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c>.
+    /// <b>NOT UPSTREAM (D155): upstream's switch is missing the <c>SET_*_IGN</c> arms that
+    /// <c>fuzzy_ext_match</c> has</b>, as well as the <c>SET_*_REV</c>, <c>SET_*_IGN_REV</c> and ANY
+    /// ones neither has. Since the function runs only when both sides are being full-case-folded -
+    /// which needs <c>(?f)</c> with <c>(?i)</c> - every set test node reaching it is an <c>_IGN</c>
+    /// one, so upstream's set test here always falls off the end of the switch to
+    /// <see langword="true"/> and constrains nothing, where the same test outside a folding would
+    /// bite. This port adds the missing arms, as in <see cref="FuzzyExtMatch"/>; pinned by
+    /// <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c>.
     /// </para>
     /// <para>
     /// By the same argument the non-<c>_IGN</c> arms are unreachable: the fuzzy-test grammar accepts
@@ -13685,7 +13739,38 @@ internal static class Matcher
                     testNode,
                     FoldedCharAt(state, foldEncoding, state.PrevPos(state.TextPos), foldedPos - 1)
                 ) == testNode.Match,
-            _ => true,
+
+            // NOT UPSTREAM (D155): the arms upstream's switch lacks; see the remarks.
+            Opcode.SetDiffIgn
+            or Opcode.SetInterIgn
+            or Opcode.SetSymDiffIgn
+            or Opcode.SetUnionIgn
+            or Opcode.Any
+            or Opcode.AnyAll
+            or Opcode.AnyU => state.Pattern.UpstreamFuzzyTestArms
+                || (
+                    state.TextPos < state.SliceEnd
+                    && TestAllows(testNode, FoldedCharAt(state, foldEncoding, state.TextPos, foldedPos))
+                ),
+            Opcode.SetDiffRev
+            or Opcode.SetInterRev
+            or Opcode.SetSymDiffRev
+            or Opcode.SetUnionRev
+            or Opcode.SetDiffIgnRev
+            or Opcode.SetInterIgnRev
+            or Opcode.SetSymDiffIgnRev
+            or Opcode.SetUnionIgnRev
+            or Opcode.AnyRev
+            or Opcode.AnyAllRev
+            or Opcode.AnyURev => state.Pattern.UpstreamFuzzyTestArms
+                || (
+                    state.TextPos > state.SliceStart
+                    && TestAllows(
+                        testNode,
+                        FoldedCharAt(state, foldEncoding, state.PrevPos(state.TextPos), foldedPos - 1)
+                    )
+                ),
+            _ => AnUnlistedTestAllowsEverything(testNode),
         };
     }
 

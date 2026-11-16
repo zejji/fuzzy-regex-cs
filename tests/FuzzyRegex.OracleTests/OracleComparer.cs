@@ -496,6 +496,12 @@ internal static class OracleComparer
         // rows D125 alone explains. See `called-copy-keeps-the-groups-close-order`.
         compiled.PatternObject.UpstreamCopyEndIndex = namedAblation;
 
+        // D155 likewise: upstream's fuzzy test allows every error where its switch has no arm (a
+        // reversed set, a set inside a folding, '.'), on every row with such a test, and the
+        // switch changes nothing on a row without one. Its own entry sits just before D125's. See
+        // `fuzzy-test-without-an-upstream-arm-allows-every-error`.
+        compiled.PatternObject.UpstreamFuzzyTestArms = namedAblation;
+
         ablate?.Invoke(compiled);
 
         // NOT A PORT BEHAVIOUR, D11: upstream has none of this port's fixes, so on a partial row an
@@ -1317,6 +1323,38 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.UpstreamCopyEndIndex = true,
+            upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's fuzzy test switches: a test whose opcode
+    /// upstream's <c>fuzzy_ext_match</c> or <c>fuzzy_ext_match_group_fld</c> has no arm for allows
+    /// every error.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 99 (D155): upstream lists no reversed set, no set inside a folding and no ANY,
+    /// so <c>(?r)(?:abc){s&lt;=1:[xy]}</c> fullmatches 'adc'. Setting
+    /// <c>PatternObject.UpstreamFuzzyTestArms</c> takes this port's arms away, with the rest of the
+    /// named ablations' stack except D125's switch: D125's ablation stacks this one, so this one
+    /// leaving D125's out is what lets each entry claim only its own rows. The
+    /// <c>fuzzy-test-without-an-upstream-arm-allows-every-error</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's switches, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamFuzzyTestArms(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled =>
+            {
+                compiled.PatternObject.UpstreamFuzzyTestArms = true;
+                compiled.PatternObject.UpstreamCopyEndIndex = false;
+            },
             upstreamCallCaptures: true
         );
     }

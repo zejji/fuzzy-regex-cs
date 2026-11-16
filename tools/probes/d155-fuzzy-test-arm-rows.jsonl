@@ -1,0 +1,5 @@
+{"pattern": "(?r)(?:abc){s<=1:[xy]}", "flags": 0, "subject": "adc", "operation": "fullmatch"}
+{"pattern": "(?r)\\A(?:tesco){e<=2:[xyz]}\\Z", "flags": 0, "subject": "tecso", "operation": "search"}
+{"pattern": "(?<=(?:[ab][cd]){e<=1:[0-9x]})$", "flags": 0, "subject": "azc", "operation": "search"}
+{"pattern": "(?:[ab][cd]){e<=1:.}", "flags": 0, "subject": "a\nc", "operation": "fullmatch"}
+{"pattern": "(?fi)(ß)(?:\\1){e<=1:[sq]}", "flags": 0, "subject": "ßsx", "operation": "fullmatch"}
