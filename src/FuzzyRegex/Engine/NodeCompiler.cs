@@ -1013,11 +1013,15 @@ internal static class NodeCompiler
         // Create a node for the lookaround.
         Node testNode = CreateNode(args.Pattern, Opcode.Conditional, flags, 0, 0);
 
-        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
-        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        // NOT UPSTREAM'S, D115 and D116: see PatternObject.LooksAgainstTheScan and
+        // LooksBackAtTheAnchor. The test's nodes are the ones created from here to its end.
+        bool againstTheScan = forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+        if (againstTheScan)
         {
             args.Pattern.LooksAgainstTheScan = true;
         }
+
+        int firstTestNode = args.Pattern.NodeList.Count;
 
         args.Code += 3;
 
@@ -1047,6 +1051,11 @@ internal static class NodeCompiler
         args.VisibleCaptureCount = subargs.VisibleCaptureCount;
 
         ++args.Code;
+
+        if (againstTheScan)
+        {
+            NoteABodyThatCanReachTheAnchor(args.Pattern, firstTestNode);
+        }
 
         // Check the lookaround subpattern.
         if (subargs.HasGroups)
@@ -1410,6 +1419,52 @@ internal static class NodeCompiler
         return _success;
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S, D116: sets <see cref="PatternObject.LooksBackAtTheAnchor"/> when the body of
+    /// a lookaround against the scan, or a conditional's test, holds something that can read the
+    /// search anchor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What reads the anchor is a fuzzy item's insertion ban and <c>Matcher.AnchorIsPinned</c>; the
+    /// full list is in <c>Matcher.BestWalkKnownToFail</c>. The body's own nodes are the ones created
+    /// after <paramref name="firstBodyNode"/>, so a lookaround nested in it is read too. Each test has
+    /// a witness in <c>BestMatchWalkMemoTests</c> that goes red without it, except where noted:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>A group call: the called group is compiled elsewhere, so its fuzzy section is not among
+    /// these nodes (a <c>(?(DEFINE)...)</c> group, a recursive group, or any call under
+    /// <c>upstreamCalls</c> or <see cref="Parsing.Info.UpstreamCallFeatures"/>).</item>
+    /// <item>A node with the fuzzy flag: an item compiled fuzzy, including a conditional's test
+    /// under the oracle-only <see cref="Parsing.Info.UpstreamFuzzyConditionTest"/>, which sets no
+    /// fuzzy section.</item>
+    /// <item>A fuzzy section's own nodes: no witness of their own, since every witness's section
+    /// holds a flagged item too; kept for a section whose items carry no flag, an empty one say,
+    /// which is counted as fuzzy rather than argued exact. The body's <c>is_fuzzy</c> is not read:
+    /// only <c>BuildFuzzy</c> sets it, and that always creates a section node here.</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="pattern">The pattern being compiled.</param>
+    /// <param name="firstBodyNode">The index in <see cref="PatternObject.NodeList"/> of the body's first node.</param>
+    private static void NoteABodyThatCanReachTheAnchor(PatternObject pattern, int firstBodyNode)
+    {
+        if (pattern.LooksBackAtTheAnchor)
+        {
+            return;
+        }
+
+        List<Node> nodes = pattern.NodeList;
+        for (int i = firstBodyNode; i < nodes.Count; i++)
+        {
+            Node node = nodes[i];
+            if (node.Op is Opcode.GroupCall or Opcode.Fuzzy or Opcode.EndFuzzy || (node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                pattern.LooksBackAtTheAnchor = true;
+                return;
+            }
+        }
+    }
+
     /// <summary>Upstream <c>build_LOOKAROUND</c> (line 24900).</summary>
     /// <param name="args">The compile state.</param>
     /// <returns>A status code.</returns>
@@ -1428,11 +1483,15 @@ internal static class NodeCompiler
         Node lookaroundNode = CreateNode(args.Pattern, Opcode.Lookaround, flags, 0, 0);
         lookaroundNode.OutcomeKey = args.Code + 1; // D101 option D, share 1: the source, until SetNegativeOutcomeKeys
 
-        // NOT UPSTREAM'S, D115: see PatternObject.LooksAgainstTheScan.
-        if (forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0))
+        // NOT UPSTREAM'S, D115 and D116: see PatternObject.LooksAgainstTheScan and
+        // LooksBackAtTheAnchor. The body's nodes are the ones created from here to its end.
+        bool againstTheScan = forward == ((args.Pattern.Flags & RegexFlags.Reverse) != 0);
+        if (againstTheScan)
         {
             args.Pattern.LooksAgainstTheScan = true;
         }
+
+        int firstBodyNode = args.Pattern.NodeList.Count;
 
         args.Code += 3;
 
@@ -1455,6 +1514,11 @@ internal static class NodeCompiler
 
         args.Code = subargs.Code;
         ++args.Code;
+
+        if (againstTheScan)
+        {
+            NoteABodyThatCanReachTheAnchor(args.Pattern, firstBodyNode);
+        }
 
         // Check the subpattern.
         args.HasCaptures |= subargs.HasCaptures;

@@ -350,13 +350,14 @@ public sealed class AllocationTests
     /// to answer that cost 7-12% of its compile allocation. The ceilings are the count-only walk's
     /// (Debug, JIT, 2026-11-06); the integration branch before it, e9c4161a, allocated 33,768 and
     /// 112,920 B. Native AOT was not measured, so the test runs under the JIT only. Item 10 added
-    /// one reference field to the state the compile builds (<c>MatchState.RankedScratch</c>), 8 B.
+    /// one reference field to the state the compile builds (<c>MatchState.RankedScratch</c>), 8 B,
+    /// and D116 one bool to the pattern (<c>PatternObject.LooksBackAtTheAnchor</c>), 8 B more.
     /// </summary>
     /// <param name="pattern">The pattern: a keyed lookaround and a capture group.</param>
     /// <param name="jitCeiling">The fix's bytes for one compile under the JIT, Debug.</param>
     [Test]
-    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_296)]
-    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_552)]
+    [Arguments(@"(\w+)(?=\w*\d)(?!\d+\b)\w+", 30_304)]
+    [Arguments(@"((?=(?:ab|a)*(b?)a?)a)+(?(2)c|d)", 105_560)]
     public void Compiling_a_pattern_with_a_keyed_lookaround_and_a_group_counts_open_groups_only(
         string pattern,
         long jitCeiling
