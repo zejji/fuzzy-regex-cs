@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-16 23:30 by Claude Code (D116 and D155 merged to main; push next, then D68/D82 timing).
+**Updated:** 2026-11-16 23:35 by Claude Code (D116, D155 merged and pushed b6d18508; D68 re-measured; D82 waits for LibreHardwareMonitor).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,7 +19,7 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68, D82: re-measure in a timing window; then pick the next fix: recommended D116 (design note with options first) |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 re-measured 2026-11-16: non-recursive calls now cost the same as written out (inliner), open only for recursions; D82: full BDN vs baseline when LibreHardwareMonitor runs; then pick the next fix: recommended D116 (design note with options first) |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -44,5 +44,5 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** ratchet the D155 merge, commit, push main (owner mandate); then D68/D82 timing (both peers done,
-quiet window); checkpoint at 99% weekly, cswap switch 2 (this session owns the switch).
+**Next action:** D82 full BDN against the baseline once LibreHardwareMonitor is running (needs the owner: elevated);
+meanwhile D160 (reverse change positions) test-first, or the D68 recursion cost measurement.
