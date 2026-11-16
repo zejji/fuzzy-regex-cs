@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-15 11:05 by Claude Code (D105 fully merged, D118 closed; paused for the owner).
+**Updated:** 2026-11-16 19:40 by Claude Code (item 15: D116 design note started, subagent).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,7 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Nothing running. AC sleep 30 min (restored 2026-11-15). Timing only in a quiet window agreed with any peer session (ListAgents, SendMessage).
+- D116 design note being written by a subagent (output `docs/plan/2026-11-16-d116-bestmatch-lookbehind-design.md`, scratch `.scratch/d116/`); no code. AC sleep 30 min (restored 2026-11-15). Timing only in a quiet window agreed with any peer session (ListAgents, SendMessage).
 - Deferred defects: D134, D136, D137, D142. New, not yet sized: D155 (reverse edit tests). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
