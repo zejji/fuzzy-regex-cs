@@ -417,6 +417,16 @@ internal sealed class PatternObject
     internal bool LooksAgainstTheScan;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D116: whether a lookaround against the scan (see
+    /// <see cref="LooksAgainstTheScan"/>), or a conditional's test against it, holds something
+    /// that can read the search anchor: a fuzzy item, a fuzzy section or a group call. Only such a
+    /// body can bring an attempt back to where a search began, so only it withholds the BESTMATCH
+    /// walk memo. Set in <c>NodeCompiler.NoteABodyThatCanReachTheAnchor</c>; see
+    /// <c>Matcher.BestWalkKnownToFail</c>.
+    /// </summary>
+    internal bool LooksBackAtTheAnchor;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: whether the pattern holds a <c>(*PRUNE)</c> or <c>(*SKIP)</c>, so that a
     /// run-out in a lookaround body may have skipped one (design section 4.2, the run-out taint).
     /// </summary>

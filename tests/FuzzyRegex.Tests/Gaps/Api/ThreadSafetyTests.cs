@@ -906,6 +906,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.ReadsTheSearchAnchor",
             // D115: written by the compiler where it builds a lookaround or a conditional's test.
             "PatternObject.LooksAgainstTheScan",
+            // D116: written by the compiler beside LooksAgainstTheScan, once its body is built.
+            "PatternObject.LooksBackAtTheAnchor",
             // D11 chunk 8, review round 1: written by Compile in the node-numbering loop.
             "PatternObject.AnAttemptCanMoveTheNextStart",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections, which Compile reaches through

@@ -4242,6 +4242,18 @@ internal static class Matcher
     /// <returns><see langword="true"/> if an insertion may open the match after all.</returns>
     private static bool AnchorIsPinned(MatchState state, long step)
     {
+        // NOT UPSTREAM'S, D116: the premise of the BESTMATCH walk memo (BestWalkKnownToFail). A
+        // fuzzy item reads the anchor only on the attempt that starts there, unless a body that
+        // runs against the scan brought it back, and then the memo is withheld.
+        Debug.Assert(
+            (state.Pattern.Flags & RegexFlags.BestMatch) == 0
+                || state.TextPos != state.SearchAnchor
+                || state.AttemptStart == state.SearchAnchor
+                || state.Pattern.LooksBackAtTheAnchor
+                || state.Pattern.ReadsTheSearchAnchor,
+            "D116: a fuzzy item meets the search anchor only on the attempt that starts there, or inside a body that can reach it"
+        );
+
         if (state.Pattern.AnchorGuards is not { Count: > 0 } guards)
         {
             return false;
@@ -26741,11 +26753,13 @@ internal static class Matcher
     /// (D115 review, round 1). So the attempt at S is run, as the search would run it.
     /// </para>
     /// <para>
-    /// Every attempt after it starts past S and past F, and none reaches back to either while the
-    /// pattern reads only in the scan's direction: each attempt's text position moves away from its
-    /// start except inside a lookaround that runs the other way, and a pattern with one is not
-    /// remembered (<see cref="PatternObject.LooksAgainstTheScan"/>). So no ban touches those
-    /// attempts in either search, and they run the same, but for the bounds. The bounds only prune:
+    /// Every attempt after it starts past S and past F, and none reaches back to either: each
+    /// attempt's text position moves away from its start except inside a lookaround that runs the
+    /// other way (<see cref="PatternObject.LooksAgainstTheScan"/>), and inside one only a fuzzy item
+    /// reads the anchor. So a pattern is not remembered when such a lookaround's body can run a
+    /// fuzzy item (<see cref="PatternObject.LooksBackAtTheAnchor"/>, D116); an exact body, such as
+    /// <c>(?&lt;=\s)</c>, reads only text. So no ban touches those attempts in either search, and
+    /// they run the same, but for the bounds. The bounds only prune:
     /// a body that commits to what it read runs with them lifted (D102, D109) and is judged against
     /// them only at its end. Each of those attempts failed in the fact's search, under bounds at
     /// least as wide, so each fails again. When S is F the two searches are the same search, but
@@ -26757,6 +26771,20 @@ internal static class Matcher
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109 refuses them in a fuzzy
     /// pattern anyway); a partial search, which can succeed at the slice's end; and a different
     /// slice, since a lookaround reads up to its edges.
+    /// </para>
+    /// <para>
+    /// The anchor reads, all in this file, checked for D116 (VERIFICATION rule 10): the insertion
+    /// ban in <see cref="FuzzyMatchItem"/>, <see cref="RetryFuzzyMatchItem"/>,
+    /// <see cref="FuzzyMatchString"/>, <see cref="RetryFuzzyMatchString"/>,
+    /// <see cref="FuzzyMatchStringFld"/>, <see cref="RetryFuzzyMatchStringFld"/>,
+    /// <see cref="OfferWholeFoldedGroupCharEdit"/>, <see cref="FuzzyMatchGroupFld"/> and
+    /// <see cref="RetryFuzzyMatchGroupFld"/>, each reached only from a node with the fuzzy flag, and
+    /// <see cref="AnchorIsPinned"/>, which only they call and which asserts the premise; the
+    /// empty-match ban at <see cref="Opcode.Success"/> in <see cref="BasicMatchCore"/> (three
+    /// places), which compares a match's end, never inside a lookaround; and <c>\G</c>
+    /// (<see cref="BackslashGPosition"/>), excluded by <see cref="PatternObject.ReadsTheSearchAnchor"/>.
+    /// <see cref="MatchState.AttemptStart"/> and <see cref="MatchState.MatchPos"/> are the attempt's
+    /// own start, not the search's.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state, holding the live bounds and the recorded facts.</param>
@@ -26866,7 +26894,7 @@ internal static class Matcher
         return state.PartialSide == MatchState.PartialNone
             && !state.Pattern.ReadsTheSearchAnchor
             && !state.Pattern.HasBacktrackingVerb
-            && !state.Pattern.LooksAgainstTheScan;
+            && !state.Pattern.LooksBackAtTheAnchor;
     }
 
     /// <summary>
