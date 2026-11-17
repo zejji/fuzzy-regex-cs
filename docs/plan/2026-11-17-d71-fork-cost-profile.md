@@ -71,3 +71,15 @@ Measure C's premise first (the continuation memo's hit rate on X1 and on the D10
 counter). Build A regardless: it is local, changes no answer, and removes work the profile shows.
 Take B only if A's re-profile still shows the hash on top. Every change gets the usual gates
 (ratchet, oracle 3 seeds, differential against main, allocation check) and a before/after profile.
+
+## After option A (2026-11-17, main ed333ada)
+
+Option A merged: each continuation key is hashed once (`TailKeyValues.HashOf`, the hash carried on
+the continuation mark). Hashes per X1 search halved, X1 5-10% faster. A second WPR profile of the
+same run (n = 300, 10 s): the hash is now 7.0% inclusive, the dictionary lookups 9.3%, and copying
+each looked-up key into the one-entry cache (`KeyedTailGuards.Remember`) 3.9%. The `.*` rescans are
+still about 18%. What is left of the memo's cost is one hash and one dictionary lookup per key,
+which the memo needs. Option B (a cheaper hash) and skipping the one-entry cache would each save a
+few percent at most; neither is worth a change on its own. A larger gain needs fewer keys, not
+cheaper ones: building no key where a lookup cannot hit, which is research, not a local change.
+D71 stays open on that.

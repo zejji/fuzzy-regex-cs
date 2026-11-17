@@ -43,4 +43,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** confirm CI on the D71 merge. Then D71's next step: re-profile X1 on main to see what of the continuation memo is left (option B, a cheaper hash, only if the hash is still on top), or D99/D123 (notes in their rows), design note first. D82 full BDN still waits for LibreHardwareMonitor (owner).
+**Next action:** D99 or D123 (notes in their rows), design note first; D71 is left with research only (fewer keys, design note section 'After option A'). D82 full BDN still waits for LibreHardwareMonitor (owner).
