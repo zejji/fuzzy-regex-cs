@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 01:45 by Claude Code (D160 gated GREEN, uncommitted: its commit was reaped for low memory; main CI green again at c700a183).
+**Updated:** 2026-11-17 07:10 by Claude Code (D160 merged and pushed 8f009e0a; D155 and D160 in Completed as F149, F150).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,8 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D160 on `fix/d160-reverse-change-positions` (worktree `.claude/worktrees/d160`, all changes uncommitted, 30 files): gates GREEN (ratchet with the one rename accepted; doc examples; oracle 3 seeds: 7 and 4242 clean, 20261116 only D161/D162). The commit (message `.scratch/d160-msg.txt`) was killed by Claude Code for low memory during the jb inspection (~12 GB). To finish: with >= 14 GB free and nothing else building, in the worktree run `pwsh -File tools/check-ratchet.ps1 -AcceptRemovals`, stage `docs/STATUS.md tests/status-stamp.txt`, `git commit -F ../../../.scratch/d160-msg.txt` under `.scratch/s1024/commit.lock`; merge to main; on main `tools/check-ratchet.ps1 -AcceptRemovals -UpdateBaseline` (the rename), commit the baseline, push.
-- CI run 43977874731 on b6d18508 failed (D155 renames still in `tests/parity-baseline.json`); baseline refreshed and pushed as c700a183, CI 43991581451 green.
+- D160 merged (F150), pushed 8f009e0a; CI on it being watched. Worktree `.claude/worktrees/d160` can go once CI is green.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
@@ -45,4 +44,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** finish the D160 commit, merge and push as in In flight; then D82 full BDN once LibreHardwareMonitor runs (needs the owner), or the D68 recursion cost measurement.
+**Next action:** confirm CI on 8f009e0a; then the D68 recursion cost measurement (indicative timing, no LibreHardwareMonitor needed for a ratio), or D82 full BDN once LibreHardwareMonitor runs (needs the owner).
