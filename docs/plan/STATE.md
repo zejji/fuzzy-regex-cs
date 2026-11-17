@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-16 23:35 by Claude Code (D116, D155 merged and pushed b6d18508; D68 re-measured; D82 waits for LibreHardwareMonitor).
+**Updated:** 2026-11-17 01:05 by Claude Code (CI fix: parity baseline after D155's renames; D160 gating on `fix/d160-reverse-change-positions`).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,8 +36,9 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D116 merged to main (F148). D155 merged (branch 1a788b76; oracle 3 seeds only D161/D162, identical on main). Push after the merge ratchet.
-- Deferred defects: D134, D136, D137, D142. New: D160 (reverse change positions, red [Explicit] test), D161/D162 (oracle rows). Parked: transpositions (post-1.3).
+- D160 on `fix/d160-reverse-change-positions` (worktree `.claude/worktrees/d160`, uncommitted): report-time fix + oracle wiring done; oracle 3 seeds running (`.scratch/d160-gates.ps1`, log `.scratch/d160-gates.log`); 15 Gaps tests pin upstream's reversed positions and need updating, then ratchet, commit, merge.
+- CI run 43977874731 on b6d18508 failed: the three D155 renames were still in `tests/parity-baseline.json`; refreshed with `-AcceptRemovals -UpdateBaseline` and pushed.
+- Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
