@@ -174,6 +174,24 @@ internal static class WorkCounter
     internal static long LeftRecursionReads { get; private set; }
 
     /// <summary>
+    /// D71: lookups of D104's continuation memo on this thread (<c>MatchState.ContinuationFailed</c>),
+    /// and how many of them found the continuation already failed.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long ContinuationChecks { get; private set; }
+
+    /// <summary>
+    /// D71: keyed guard and continuation keys hashed on this thread (<c>TailKeyValues</c>). Each
+    /// hash walks the whole key, so a key hashed again for the same lookup is wasted work.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long KeysHashed { get; private set; }
+
+    /// <summary>D71: the lookups counted in <see cref="ContinuationChecks"/> that hit.</summary>
+    [field: ThreadStatic]
+    internal static long ContinuationHits { get; private set; }
+
+    /// <summary>
     /// D68: groups and repeats that group-call frames saved on this thread
     /// (<c>Matcher.AdvanceGroupCall</c>). A call needs to save only what its body can change, so
     /// the count per call should not grow with the groups and repeats outside the called body.
@@ -346,6 +364,22 @@ internal static class WorkCounter
     /// <summary>Counts one node the left-recursion refusal asked whether it can match empty.</summary>
     [Conditional("DEBUG")]
     internal static void LeftRecursionRead() => LeftRecursionReads++;
+
+    /// <summary>Counts one key hashed.</summary>
+    [Conditional("DEBUG")]
+    internal static void KeyHashed() => KeysHashed++;
+
+    /// <summary>Counts one continuation memo lookup, and whether it hit.</summary>
+    /// <param name="hit">Whether the continuation had already failed.</param>
+    [Conditional("DEBUG")]
+    internal static void ContinuationChecked(bool hit)
+    {
+        ContinuationChecks++;
+        if (hit)
+        {
+            ContinuationHits++;
+        }
+    }
 
     /// <summary>Counts the groups and repeats one group-call frame saved.</summary>
     /// <param name="items">How many.</param>

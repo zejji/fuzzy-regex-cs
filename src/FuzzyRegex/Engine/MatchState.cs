@@ -4007,6 +4007,7 @@ internal sealed class MatchState : IDisposable
         }
 
         key.AsSpan().CopyTo(_cutBody.ContinuationKey);
+        _cutBody.ContinuationHash = null;
         return true;
     }
 
@@ -4033,10 +4034,25 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     /// <param name="textPos">Where the lookaround started.</param>
     /// <returns><see langword="true"/> if it did.</returns>
-    internal bool ContinuationFailed(int textPos) =>
-        _cutBody?.Store is { Count: > 0 } store
-        && store.Find(_cutBody.ContinuationKey) is GuardList list
-        && list.IsGuarded(textPos);
+    internal bool ContinuationFailed(int textPos)
+    {
+        bool failed =
+            _cutBody?.Store is { Count: > 0 } store
+            && store.Find(_cutBody.ContinuationKey, ContinuationHashOf(_cutBody)) is GuardList list
+            && list.IsGuarded(textPos);
+        WorkCounter.ContinuationChecked(failed);
+        return failed;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D71): the hash of <see cref="CutBodyRecords.ContinuationKey"/>, made the first
+    /// time it is needed after <see cref="ContinuationKeyOf"/> built the key and reused by its lookup,
+    /// its mark and its record.
+    /// </summary>
+    /// <param name="records">The records holding the key.</param>
+    /// <returns>The hash.</returns>
+    private static int ContinuationHashOf(CutBodyRecords records) =>
+        records.ContinuationHash ??= TailKeyValues.HashOf(records.ContinuationKey);
 
     /// <summary>
     /// NOT UPSTREAM (D104): pushes the mark whose pop records that the continuation keyed by
@@ -4047,6 +4063,7 @@ internal sealed class MatchState : IDisposable
     internal void PushContinuationMark(int textPos)
     {
         Bstack.PushBlock(MemoryMarshal.AsBytes(_cutBody!.ContinuationKey.AsSpan()));
+        Bstack.PushSize(ContinuationHashOf(_cutBody));
         Bstack.PushSize(textPos);
         Bstack.PushUInt8((byte)Opcode.ContinuationMark);
     }
@@ -4062,16 +4079,23 @@ internal sealed class MatchState : IDisposable
         CutBodyRecords records = _cutBody!;
         if (
             !Bstack.PopSize(out long textPos)
+            || !Bstack.PopSize(out long hash)
             || !Bstack.PopBlock(MemoryMarshal.AsBytes(records.ContinuationKey.AsSpan()))
         )
         {
             return false;
         }
 
+        records.ContinuationHash = (int)hash;
+
         // Counted before the write, as GuardRepeatAfterBlockedEnd and the keyed tail store count.
         GuardList? list =
             records.Writes++ < KeyedTailWriteCap
-                ? records.Store.ForWrite(records.ContinuationKey, mayAdd: records.Store.Count < CutBodyKeyCap)
+                ? records.Store.ForWrite(
+                    records.ContinuationKey,
+                    mayAdd: records.Store.Count < CutBodyKeyCap,
+                    records.ContinuationHash
+                )
                 : null;
         WorkCounter.CutBodyWritten(records.Store.Count, skipped: list is null);
         list?.Guard((int)textPos, true);
@@ -4411,12 +4435,19 @@ internal sealed class CutBodyRecords(int baseLength, int spanSlots, bool keysCon
     /// </summary>
     internal long[] ContinuationKey { get; } = keysContinuations ? new long[baseLength + spanSlots] : [];
 
+    /// <summary>
+    /// NOT UPSTREAM (D71): the hash of <see cref="ContinuationKey"/> once something has needed it,
+    /// cleared whenever a new key is built, so a key is hashed once for its lookup, mark and record.
+    /// </summary>
+    internal int? ContinuationHash;
+
     /// <summary>Forgets everything, for a state reused by another call.</summary>
     internal void Clear()
     {
         Writes = 0;
         Hits = 0;
         Pending = false;
+        ContinuationHash = null;
         Store.Clear();
     }
 
