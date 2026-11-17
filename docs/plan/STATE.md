@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 21:55 by Claude Code (overnight: D99 proof draft in the design note; off rule measured; D82 waiting on a peer).
+**Updated:** 2026-11-17 22:10 by Claude Code (overnight: D82 BDN running; D99 repeat-start findings recorded).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,14 +36,15 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Nothing running; main f74c25c0 pushed, CI green on ed333ada. D82 prepared: worktrees `bdn-d82main` (b41fd1ca) and `d82base` (2373e273), both built Release.
-  Run `pwsh -File .scratch/d82/run-d82.ps1` detached (caps CPU at 4000 MHz and AC standby 0, runs the
-  A-B-B-A `.scratch/d82/bdn-d82.ps1`, ~4.5 h, restores cap 0 and standby 30 min); log `.scratch/d82/run.log`. Peers: squiggle-mockups holds; future-ide no reply yet; general-questions is doing disk recovery and
-  will send "recovery done, quiet from now" (expected ~23:30). Send all three "BDN done" after.
+- **D82 BDN running** since 22:01: wrapper pwsh PID 48484 (`.scratch/d82/run-d82.ps1`), log `.scratch/d82/run.log`,
+  results `.scratch/d82/bdn/{base,main,mainb,baseb}`, A-B-B-A d82base 2373e273 vs bdn-d82main b41fd1ca, ends ~03:00.
+  The wrapper restores CPU cap 0 and AC standby 30 min. After it: delete `.scratch/s1024/cputemp-limit-override.txt`
+  (set to 100 tonight: idle reads 98-100 C, so the 86 C wait only cost 30 min a pass); send "BDN done" to
+  squiggle-mockups, future-ide, general-questions. No builds or probes until then.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when general-questions sends "recovery done", start D82 (In flight; my own probes stop first), record it in a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) D99: count only open repeats in the off rule (probe in `.claude/worktrees/d99m`, diff `.scratch/d99/probe-full.diff`), then choose: key the repeat-start state or accept the witness-shaped gain; then blind review of the proof draft, build test-first.
+**Next action:** (1) when D82 ends, compare per the 2026-11-05 note's rule, write a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) D99: measure A' and K (design note "Keying the repeat-start state"), probe in `.claude/worktrees/d99m`; then blind review of the proof, build test-first.

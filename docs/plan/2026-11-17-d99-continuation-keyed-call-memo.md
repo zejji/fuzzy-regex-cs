@@ -161,6 +161,28 @@ of the fuzzy `(?&g)*` shapes. Keying that state exactly instead (the repeat's `C
 `ChangesAtStart` and the D17 empty-iteration state) is the next design question; first measure how
 many of column A's switch-offs come from repeats that are actually open at the call.
 
+## Keying the repeat-start state instead of switching off (read, not yet measured)
+
+A second subagent read the code for the question above (`.scratch/d99/repeat-start-design.md`, 129
+lines; no probe ran, the D82 benchmark had the machine). Its findings, unverified until measured:
+
+- **No run-time "open" flag.** `RepeatData` keeps stale values after a repeat exits. An exact test can
+  be computed at compile time (the repeat's body holds the call site and lies in that level's group
+  body). On the targeted rows the `*`'s body is the call itself, so the switch-offs there are real:
+  counting only open repeats will not recover much.
+- **Every Start == p reader compares a counter with its value at the iteration's start**, so relative
+  values suffice: the `CaptureChange` difference (the frame's saved one for pending levels), the
+  `FuzzyChanges.Count` minus `ChangesAtStart`, the edits of each kind since the start, the capped count.
+- **Blocker: D17's empty-iteration states.** The set is per attempt, never undone on backtracking, and
+  keyed by a run id that body restarts keep, so it is read for every open repeat whatever its Start.
+  A hit makes `tryTail` true below the repeat's minimum (Matcher.cs ~24384, ~24625), opening a path
+  E1 never tried, so "E1 failed" would not imply "E2 fails". Options: memo off when the pattern tests
+  a group (`TestedGroups.Length > 0`), which costs the witness and the targeted rows nothing; or key
+  the number of D17 entries each open run holds. No witness built yet.
+
+Next, after the benchmark: measure column A' (open repeats only) and K (relative values keyed, memo
+off when `TestedGroups.Length > 0`) on the three corpora, then a blind review of the proof.
+
 ## The four proof obligations (draft 2026-11-17, not yet reviewed)
 
 Written by an Opus subagent from the code alone; every claim is a hypothesis until the audit mode
