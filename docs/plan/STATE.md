@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 evening by Claude Code (handover to a fresh session; LibreHardwareMonitor now running, owner).
+**Updated:** 2026-11-17 22:20 by Claude Code (overnight session: D99 recurrence refined; D82 run prepared, waiting on a peer).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,7 +36,11 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Nothing running; main f74c25c0 pushed, CI green on ed333ada (last code change).
+- Nothing running. Main f74c25c0 pushed, CI green on ed333ada (last code change).
+- D82 prepared: worktrees `bdn-d82main` (b41fd1ca) and `d82base` (2373e273), both built Release.
+  Run `pwsh -File .scratch/d82/run-d82.ps1` detached (caps CPU at 4000 MHz and AC standby 0, runs the
+  A-B-B-A `.scratch/d82/bdn-d82.ps1`, ~4.5 h, restores cap 0 and standby 30 min); log `.scratch/d82/run.log`. Peers: squiggle-mockups holds; future-ide no reply yet; general-questions is doing disk recovery and
+  will send "recovery done, quiet from now" (expected ~23:30). Send all three "BDN done" after.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
@@ -45,4 +49,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** (1) message peer sessions and agree a quiet window for D82 (full pinned BDN vs `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`, see the benchmark skill), run it then, record results; (2) meanwhile D99: refine the recurrence key (captures, open repeats) to size the gain, write the four proof obligations of `2026-11-17-d99-continuation-keyed-call-memo.md`, build test-first in its own worktree, blind review before merge.
+**Next action:** (1) when the peers are quiet, start D82 (In flight), record it in a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) meanwhile D99: write the four proof obligations of `2026-11-17-d99-continuation-keyed-call-memo.md`, build test-first in its own worktree, blind review before merge.

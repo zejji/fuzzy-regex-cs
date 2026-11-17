@@ -109,3 +109,25 @@ continuations are the common case in fuzzy patterns with recursion, not only on 
 obligations above written before the code and reviewed blind before merging. First step: refine the
 measurement key with the caller state the continuation reads (captures read after a return, open
 repeats' counts) to see how much of the 92.7% survives; that sets the gain the build can claim.
+
+## Refined: with the caller state and the reach (2026-11-17 evening)
+
+The same probe (`.scratch/d99-instrument2.py` plus a reach column, `.scratch/d99/measure2.cs`, on
+main b41fd1ca) added two stricter keys. "Strict" adds every group's count, current capture and its
+span, and every repeat's count and start: more than the continuation reads, so what repeats under it
+is a lower bound on what the memo can reuse, short only of the parked group starts on the saved stack.
+"+ reach" also adds `ReachedLow`, `ReachedHigh` and the section frame, which the failed-call key
+already holds (obligation 3 asks whether the memo can drop the reach; this column is the cost of
+keeping it).
+
+| Corpus | Call entries | Pending returns only | Strict | Strict + reach |
+|---|---|---|---|---|
+| The D99 witness | 3,806 | 3,746 (98.4%) | 3,746 (98.4%) | 3,740 (98.3%) |
+| D93's targeted rows (`calls.jsonl`) | 2,439,157 | 91.7% | 89.4% | 2,109,522 (86.5%) |
+| The battery's call rows, all | 104,922 | 90.6% | 87.7% | 89,657 (85.5%) |
+| The same, fuzzy rows only | 98,594 | 95.5% | 93.1% | not split |
+
+The entry totals move by about 1% between runs of the same build: rows that reach the 5-second
+timeout stop at different points. Almost all of the recurrence survives the stricter keys, so the
+captures and repeats do not eat the gain, and keeping the reach in the key costs about 3 points.
+The build stays recommended, keeping the reach in the key unless obligation 3 is proved.
