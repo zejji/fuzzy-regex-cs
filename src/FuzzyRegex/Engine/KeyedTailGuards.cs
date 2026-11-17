@@ -47,14 +47,32 @@ internal sealed class KeyedTailGuards
     /// <summary>The list for <paramref name="key"/>, or <see langword="null"/> when there is none.</summary>
     /// <param name="key">The key, in a scratch array the caller keeps.</param>
     /// <returns>The list.</returns>
-    internal GuardList? Find(long[] key)
+    internal GuardList? Find(long[] key) => Find(key, null);
+
+    /// <summary>
+    /// <see cref="Find(long[])"/> with the key's hash when the caller has it (D71), so the key is
+    /// not hashed again.
+    /// </summary>
+    /// <param name="key">The key, in a scratch array the caller keeps.</param>
+    /// <param name="hash">The key's <see cref="TailKeyValues.HashOf"/>, or <see langword="null"/>.</param>
+    /// <returns>The list.</returns>
+    internal GuardList? Find(long[] key, int? hash)
     {
         if (_hasCurrent && key.AsSpan().SequenceEqual(_currentKey))
         {
             return _current;
         }
 
-        _ = _lists.TryGetValue(new TailKeyValues(key), out GuardList? list);
+        return FindHashed(key, hash ?? TailKeyValues.HashOf(key));
+    }
+
+    /// <summary>The dictionary lookup of <see cref="Find(long[], int?)"/>, remembered as the last key.</summary>
+    /// <param name="key">The key.</param>
+    /// <param name="hash">Its hash.</param>
+    /// <returns>The list.</returns>
+    private GuardList? FindHashed(long[] key, int hash)
+    {
+        _ = _lists.TryGetValue(new TailKeyValues(key, hash), out GuardList? list);
         Remember(key, list);
         return list;
     }
@@ -66,14 +84,37 @@ internal sealed class KeyedTailGuards
     /// <param name="key">The key, in a scratch array the caller keeps.</param>
     /// <param name="mayAdd">Whether a new list may be made (the memory cap).</param>
     /// <returns>The list.</returns>
-    internal GuardList? ForWrite(long[] key, bool mayAdd)
+    internal GuardList? ForWrite(long[] key, bool mayAdd) => ForWrite(key, mayAdd, null);
+
+    /// <summary>
+    /// <see cref="ForWrite(long[], bool)"/> with the key's hash when the caller has it. The key is
+    /// hashed at most once, for the lookup and the insert together (D71: it was hashed for each).
+    /// </summary>
+    /// <param name="key">The key, in a scratch array the caller keeps.</param>
+    /// <param name="mayAdd">Whether a new list may be made (the memory cap).</param>
+    /// <param name="knownHash">The key's <see cref="TailKeyValues.HashOf"/>, or <see langword="null"/>.</param>
+    /// <returns>The list.</returns>
+    internal GuardList? ForWrite(long[] key, bool mayAdd, int? knownHash)
     {
         _changes++;
-        GuardList? list = Find(key);
+        int? hash = knownHash;
+        GuardList? list;
+        if (_hasCurrent && key.AsSpan().SequenceEqual(_currentKey))
+        {
+            list = _current;
+        }
+        else
+        {
+            hash ??= TailKeyValues.HashOf(key);
+            list = FindHashed(key, hash.Value);
+        }
+
         if (list is not null || !mayAdd)
         {
             return list;
         }
+
+        hash ??= TailKeyValues.HashOf(key);
 
         long[] copy;
         if (_spare.Count > 0 && _spare.Peek().Key.Length == key.Length)
@@ -88,7 +129,7 @@ internal sealed class KeyedTailGuards
             list = new GuardList();
         }
 
-        _lists[new TailKeyValues(copy)] = list;
+        _lists[new TailKeyValues(copy, hash.Value)] = list;
         Remember(key, list);
         return list;
     }
@@ -218,9 +259,9 @@ internal sealed class KeyedTailGuards
     /// <summary>
     /// Debug only: asserts that a save whose change count still matches holds exactly the lists
     /// there are now, which is what lets <see cref="PopFrom"/> drop it unread. It rests on every
-    /// edit of a keyed list going through <see cref="ForWrite"/> or <see cref="Reset"/>, both of
+    /// edit of a keyed list going through <see cref="ForWrite(long[], bool)"/> or <see cref="Reset"/>, both of
     /// which count a change (<c>MatchState.KeyedTailGuardList</c> hands out a list to write only
-    /// from <see cref="ForWrite"/>).
+    /// from <see cref="ForWrite(long[], bool)"/>).
     /// </summary>
     /// <param name="stack">The backtrack stack, with the save's lists on top.</param>
     /// <param name="lists">How many lists the save holds.</param>
@@ -280,15 +321,42 @@ internal readonly struct TailKeyValues : IEquatable<TailKeyValues>
     /// <summary>Wraps <paramref name="values"/> without copying them.</summary>
     /// <param name="values">The values.</param>
     internal TailKeyValues(long[] values)
+        : this(values, HashOf(values)) { }
+
+    /// <summary>
+    /// NOT UPSTREAM (D71): wraps <paramref name="values"/> with a hash <see cref="HashOf"/> already
+    /// gave for them, so a key looked up and then written is hashed once.
+    /// </summary>
+    /// <param name="values">The values.</param>
+    /// <param name="hash">Their <see cref="HashOf"/>.</param>
+    internal TailKeyValues(long[] values, int hash)
     {
+        Debug.Assert(hash == HashOfUncounted(values), "D71: a carried hash is the hash of these values");
         Values = values;
+        _hash = hash;
+    }
+
+    /// <summary>The hash a key's values have in the dictionary.</summary>
+    /// <param name="values">The values.</param>
+    /// <returns>The hash.</returns>
+    internal static int HashOf(ReadOnlySpan<long> values)
+    {
+        WorkCounter.KeyHashed();
+        return HashOfUncounted(values);
+    }
+
+    /// <summary><see cref="HashOf"/> without counting it, for the Debug check of a carried hash.</summary>
+    /// <param name="values">The values.</param>
+    /// <returns>The hash.</returns>
+    private static int HashOfUncounted(ReadOnlySpan<long> values)
+    {
         var hash = new HashCode();
         foreach (long value in values)
         {
             hash.Add(value);
         }
 
-        _hash = hash.ToHashCode();
+        return hash.ToHashCode();
     }
 
     /// <inheritdoc/>
