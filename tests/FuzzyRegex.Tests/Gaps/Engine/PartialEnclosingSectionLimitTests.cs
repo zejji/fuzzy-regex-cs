@@ -26,7 +26,8 @@ public sealed class PartialEnclosingSectionLimitTests
     [Test]
     [Arguments(@"(?:(?:b){e<=2}){i<=1}x", 0)]
     [Arguments(@"(?=(?:(?:b){e<=2}){i<=1}x)", 0)]
-    [Arguments(@"(?r)x(?:(?:b){e<=2}){i<=1}", 1)]
+    // The inserted 'c' is at 0 reversed too; upstream reports it after it, at 1 (D160).
+    [Arguments(@"(?r)x(?:(?:b){e<=2}){i<=1}", 0)]
     [Arguments(@"(?b)(?:(?:b){e<=2}){i<=1}x", 0)]
     [Arguments(@"(?e)(?:(?:b){e<=2}){i<=1}x", 0)]
     public void A_partial_takes_the_path_the_enclosing_section_allows(string pattern, int insertedAt)

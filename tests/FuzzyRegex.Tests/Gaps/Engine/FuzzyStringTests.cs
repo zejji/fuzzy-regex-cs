@@ -93,13 +93,13 @@ public sealed class FuzzyStringTests
         Match sub = new FuzzyRegex("(?r)(?:abc){e<=1}").MatchAtStart("axc");
         (sub.Index, sub.Length).Should().Be((0, 3));
         sub.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        sub.FuzzyChanges.Substitutions.Should().Equal(2);
+        sub.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
 
         // rev-ins match('(?r)(?:abc){e<=1}', 'abxc'): span=(0, 4) counts=(0, 1, 0) changes=([], [3], [])
         Match ins = new FuzzyRegex("(?r)(?:abc){e<=1}").MatchAtStart("abxc");
         (ins.Index, ins.Length).Should().Be((0, 4));
         ins.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
-        ins.FuzzyChanges.Insertions.Should().Equal(3);
+        ins.FuzzyChanges.Insertions.Should().Equal(2); // upstream: 3 (D160)
 
         // rev-del match('(?r)(?:abc){e<=1}', 'ac'): span=(0, 2) counts=(0, 0, 1) changes=([], [], [1])
         Match del = new FuzzyRegex("(?r)(?:abc){e<=1}").MatchAtStart("ac");
@@ -121,7 +121,7 @@ public sealed class FuzzyStringTests
         Match reverse = new FuzzyRegex("(?ri)(?:abc){e<=1}").MatchAtStart("AxC");
         (reverse.Index, reverse.Length).Should().Be((0, 3));
         reverse.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        reverse.FuzzyChanges.Substitutions.Should().Equal(2);
+        reverse.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
     }
 
     [Test]
@@ -165,7 +165,7 @@ public sealed class FuzzyStringTests
         Match reverse = new FuzzyRegex("(?fir)(?:straße){e<=1}").MatchAtStart("STRASSX");
         (reverse.Index, reverse.Length).Should().Be((0, 7));
         reverse.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        reverse.FuzzyChanges.Substitutions.Should().Equal(7);
+        reverse.FuzzyChanges.Substitutions.Should().Equal(6); // upstream: 7 (D160)
     }
 
     [Test]
@@ -194,7 +194,7 @@ public sealed class FuzzyStringTests
         Match rev = new FuzzyRegex(@"(?r)(?:\1){e<=1}(abc)").MatchAtStart("abxabc");
         (rev.Index, rev.Length).Should().Be((0, 6));
         rev.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        rev.FuzzyChanges.Substitutions.Should().Equal(3);
+        rev.FuzzyChanges.Substitutions.Should().Equal(2); // upstream: 3 (D160)
     }
 
     [Test]

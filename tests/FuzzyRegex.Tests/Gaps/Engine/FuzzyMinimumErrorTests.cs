@@ -106,7 +106,7 @@ public sealed class FuzzyMinimumErrorTests
         (anchored.Success, anchored.Index, anchored.Length).Should().Be((true, 0, 3));
         // A reversed insertion is recorded at the position before the step, as upstream records one:
         // search('(?r)x(?:a){i<=1}', 'xya') has fuzzy_changes ([], [2], []).
-        anchored.FuzzyChanges.Insertions.Should().Equal(2);
+        anchored.FuzzyChanges.Insertions.Should().Equal(1); // upstream: 2 (D160)
         (search.Index, search.Length).Should().Be((0, 3));
         search.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
     }

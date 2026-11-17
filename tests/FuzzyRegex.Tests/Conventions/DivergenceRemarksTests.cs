@@ -89,6 +89,7 @@ public sealed class DivergenceRemarksTests
             "Indices are UTF-16 code units",
             [Type("Capture"), Type("FuzzyRegex"), "P:" + _ns + "FuzzyRegexParseException.Offset"]
         ),
+        ("A reversed match reports a change at the character it changed", ["P:" + _ns + "Match.FuzzyChanges"]),
         ("Upstream's `pos`/`endpos` are reshaped to `beginning`/`length`", [Type("FuzzyRegex")]),
         (
             "`Split` spells \"no limit\" as `maxSplits = -1`",

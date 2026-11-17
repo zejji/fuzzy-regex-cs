@@ -246,7 +246,13 @@ internal static class OracleComparer
         return Run(
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
-            ablate: dirty,
+            // Not an ablation, though it rides the same hook: the live answer on a used pattern, so
+            // it reports this port's change positions as the live run does (D160).
+            ablate: compiled =>
+            {
+                dirty(compiled);
+                compiled.PatternObject.UpstreamChangePositions = false;
+            },
             composeWithD11: false
         );
     }
@@ -501,6 +507,25 @@ internal static class OracleComparer
         // switch changes nothing on a row without one. Its own entry sits just before D125's. See
         // `fuzzy-test-without-an-upstream-arm-allows-every-error`.
         compiled.PatternObject.UpstreamFuzzyTestArms = namedAblation;
+
+        // D160, more widely than the others: upstream reports a reversed substitution or insertion
+        // one character after it, on every row with one, and the switch changes only the reported
+        // positions, never a match. So every ablation reports upstream's positions, the single-switch
+        // ones too: they are asked whether they agree with upstream (TheEnclosingLimitChecksAloneExplainIt,
+        // the D11 composition), and with this port's positions no reversed row ever would, which sent
+        // the named ablations down the wrong branch, or agree only by coincidence (judged row
+        // 534479534/24561, where upstream's leaked position is the number this port reports). Only
+        // the live run, with no switch and no flag, reports this port's positions. D160's own entry
+        // is the first. See `reversed-change-reported-after-its-character`.
+        compiled.PatternObject.UpstreamChangePositions =
+            namedAblation
+            || ablate is not null
+            || keepEmptyIterationRule
+            || keepMinimumOrderFix
+            || upstreamCallCaptures
+            || upstreamFuzzyConditionTest
+            || upstreamNegativeTestCaptures
+            || upstreamCalls;
 
         ablate?.Invoke(compiled);
 
@@ -1356,6 +1381,33 @@ internal static class OracleComparer
                 compiled.PatternObject.UpstreamCopyEndIndex = false;
             },
             upstreamCallCaptures: true
+        );
+    }
+
+    /// <summary>
+    /// This port's live answer to a row, with its change positions reported where upstream reports
+    /// them and nothing else different.
+    /// </summary>
+    /// <remarks>
+    /// D160: this port reports a substitution or an insertion made reading backwards at the
+    /// character's index, upstream one character after it. The switch changes only what
+    /// <c>Match.FuzzyChanges</c> reports, never a match, so this answer is the live one in
+    /// upstream's terms. <see cref="ExpectedDivergences.For"/> judges a row on it when the live
+    /// answer itself is not accounted for, so a row whose divergence is that plus something else is
+    /// claimed by the something else's entry, and every answer stored before D160 stays valid.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>The live answer with upstream's change positions, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunReportingUpstreamChangePositions(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.UpstreamChangePositions = true,
+            composeWithD11: false
         );
     }
 

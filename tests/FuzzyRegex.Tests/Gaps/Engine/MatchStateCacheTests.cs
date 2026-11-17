@@ -254,7 +254,7 @@ public sealed class MatchStateCacheTests
         Describe(one).Should().NotEqual(Describe(two));
 
         two.TotalErrors = 0;
-        two.FuzzyChanges.Add(new FuzzyChange(0, 0));
+        two.FuzzyChanges.Add(new FuzzyChange(0, 0, ReadBackwards: false));
         Describe(one).Should().NotEqual(Describe(two));
 
         two.FuzzyChanges.Clear();
@@ -437,7 +437,7 @@ public sealed class MatchStateCacheTests
                 field.SetValue(state, new HashSet<EmptyIterationState> { new(7, [7]) });
                 break;
             case List<FuzzyChange> changes:
-                changes.Add(new FuzzyChange(1, 7));
+                changes.Add(new FuzzyChange(1, 7, ReadBackwards: false));
                 break;
             case HashSet<RepeatStateKey> failed:
                 failed.Add(new RepeatStateKey(7, 7, 7, 7, 7, 7, 7, true));
@@ -523,7 +523,7 @@ public sealed class MatchStateCacheTests
                 field.SetValue(state, new long[] { 7, 7, 7 });
                 break;
             case null when field.FieldType == typeof(List<FuzzyChange>):
-                field.SetValue(state, new List<FuzzyChange> { new(1, 7) });
+                field.SetValue(state, new List<FuzzyChange> { new(1, 7, ReadBackwards: false) });
                 break;
             case null when field.FieldType == typeof(List<MatchState.BestWalkFailure>):
                 field.SetValue(state, new List<MatchState.BestWalkFailure> { new(7, 7, 7, true, 7, 7) });
@@ -555,8 +555,8 @@ public sealed class MatchStateCacheTests
                 // state must empty its lists.
                 var scratch = new Matcher.RankedScratch { InUse = true };
                 scratch.BestList.Add(new BestEntry(7, 7, 7));
-                scratch.BestChangesList.Add([new FuzzyChange(1, 7)]);
-                scratch.BestFuzzyChanges.Add(new FuzzyChange(1, 7));
+                scratch.BestChangesList.Add([new FuzzyChange(1, 7, ReadBackwards: false)]);
+                scratch.BestFuzzyChanges.Add(new FuzzyChange(1, 7, ReadBackwards: false));
                 field.SetValue(state, scratch);
                 break;
             case null when field.FieldType == typeof(Matcher.AnchorBanSnapshot):

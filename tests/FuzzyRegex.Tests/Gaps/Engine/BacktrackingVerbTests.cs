@@ -1105,7 +1105,7 @@ public sealed class BacktrackingVerbTests
 
         scan.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
         scan[1].FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        scan[1].FuzzyChanges.Substitutions.Should().Equal(5);
+        scan[1].FuzzyChanges.Substitutions.Should().Equal(3); // upstream: 5 (D160)
 
         // The control, run here rather than only quoted: `(*PRUNE)` prunes the same backtracking
         // and moves no bound, so a scan that agrees with it is a scan the verb's meaning explains.
@@ -1119,7 +1119,7 @@ public sealed class BacktrackingVerbTests
         ];
 
         pruned.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
-        pruned[1].FuzzyChanges.Substitutions.Should().Equal(5);
+        pruned[1].FuzzyChanges.Substitutions.Should().Equal(3); // upstream: 5 (D160)
     }
 
     // DIVERGES FROM UPSTREAM, deliberately (ledger entry 45). A verb acts when backtracking reaches
