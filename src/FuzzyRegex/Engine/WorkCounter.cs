@@ -174,6 +174,14 @@ internal static class WorkCounter
     internal static long LeftRecursionReads { get; private set; }
 
     /// <summary>
+    /// D68: groups and repeats that group-call frames saved on this thread
+    /// (<c>Matcher.AdvanceGroupCall</c>). A call needs to save only what its body can change, so
+    /// the count per call should not grow with the groups and repeats outside the called body.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CallFrameItemsSaved { get; private set; }
+
+    /// <summary>
     /// D105: group bodies whose widest match <c>Parsing.Group.MaxWidth</c> walked on this thread,
     /// while compiling. The required-string pass measures the called group at every call; walking
     /// each group again for every call around it would make this quadratic in the nesting depth.
@@ -338,6 +346,11 @@ internal static class WorkCounter
     /// <summary>Counts one node the left-recursion refusal asked whether it can match empty.</summary>
     [Conditional("DEBUG")]
     internal static void LeftRecursionRead() => LeftRecursionReads++;
+
+    /// <summary>Counts the groups and repeats one group-call frame saved.</summary>
+    /// <param name="items">How many.</param>
+    [Conditional("DEBUG")]
+    internal static void CallFrameSaved(int items) => CallFrameItemsSaved += items;
 
     /// <summary>Counts one group body whose widest match was walked.</summary>
     [Conditional("DEBUG")]

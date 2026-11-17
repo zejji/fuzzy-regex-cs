@@ -946,6 +946,9 @@ internal static class NodeCompiler
         // Record that we defined a call_ref.
         RecordCallRefDefined(args.Pattern, (int)callRef, startNode);
 
+        // NOT UPSTREAM (D68): where a call into this body returns, for PatternObject.SetCallFrames.
+        args.Pattern.CallRefInfoAt((int)callRef).ReturnNode = endNode;
+
         // Append the node.
         AddNode(args.End!, startNode);
         AddNode(startNode, subargs.Start!);

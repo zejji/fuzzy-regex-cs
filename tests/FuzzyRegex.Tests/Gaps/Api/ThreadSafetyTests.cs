@@ -290,6 +290,7 @@ public sealed class ThreadSafetyTests
         threadStatic
             .Should()
             .Equal(
+                "WorkCounter.<CallFrameItemsSaved>k__BackingField",
                 "WorkCounter.<CallTracksMarked>k__BackingField",
                 "WorkCounter.<CapturesSaved>k__BackingField",
                 "WorkCounter.<CharacterLimit>k__BackingField",
@@ -1060,7 +1061,11 @@ public sealed class ThreadSafetyTests
             // D125: written by NodeCompiler.BuildGroup when a called copy of the group is built.
             "GroupInfo.CopyEndIndex",
             "CallRefInfo.Defined",
+            // D68: written by PatternObject.SetCallFrames and NodeCompiler.BuildCallRef while compiling.
+            "CallRefInfo.FrameGroups",
+            "CallRefInfo.FrameRepeats",
             "CallRefInfo.Node",
+            "CallRefInfo.ReturnNode",
             "CallRefInfo.Used",
             "RepeatInfo.Status",
             // Set by NodeCompiler.BuildRepeat and withdrawn by Optimiser.KeepFailureMemosSound, both

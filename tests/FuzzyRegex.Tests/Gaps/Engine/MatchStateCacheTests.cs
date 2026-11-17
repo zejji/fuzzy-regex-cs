@@ -426,6 +426,13 @@ public sealed class MatchStateCacheTests
             case Dictionary<(long Key, int Reach), int> counts:
                 counts.Add((7, 7), 7);
                 break;
+            case Dictionary<int, (long[] Groups, long[] Repeats)> frames:
+                // D68's Debug record of open call frames.
+                frames.Add(7, ([7], [7]));
+                break;
+            case null when field.FieldType == typeof(Dictionary<int, (long[] Groups, long[] Repeats)>):
+                field.SetValue(state, new Dictionary<int, (long[] Groups, long[] Repeats)> { [7] = ([7], [7]) });
+                break;
             case CaptureTextIds ids:
                 ids.Reset("scribbled".AsMemory());
                 _ = ids.IdOf(1, 2);
@@ -707,6 +714,10 @@ public sealed class MatchStateCacheTests
             case HashSet<RepeatStateKey> failed:
                 // D94's failed-state memo: made on first use and then kept, so empty is none.
                 lines.Add(failed.Count == 0 ? $"{path}=null" : $"{path}.Count={failed.Count}");
+                break;
+            case Dictionary<int, (long[] Groups, long[] Repeats)> frames:
+                // D68's Debug record of open call frames: made on first use and then kept.
+                lines.Add(frames.Count == 0 ? $"{path}=null" : $"{path}.Count={frames.Count}");
                 break;
             case Dictionary<long, bool> outcomes:
                 // D101's negative outcome memo: made on first use and then kept, so empty is none.
