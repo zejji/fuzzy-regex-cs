@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 by Claude Code (D71 option A merged: a continuation key is hashed once; X1 5-10% faster).
+**Updated:** 2026-11-17 by Claude Code (D71 re-profiled; D99 design note `2026-11-17-d99-continuation-keyed-call-memo.md`).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -43,4 +43,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** D99 or D123 (notes in their rows), design note first; D71 is left with research only (fewer keys, design note section 'After option A'). D82 full BDN still waits for LibreHardwareMonitor (owner).
+**Next action:** D99: measure how often call entries with equal (call, position, counts) and equal continuations recur on the oracle's call rows and the ported call tests (design note's recommendation); build only if common. Else D123. D82 full BDN still waits for LibreHardwareMonitor (owner).
