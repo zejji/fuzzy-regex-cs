@@ -36,8 +36,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Nothing running. Main f74c25c0 pushed, CI green on ed333ada (last code change).
-- D82 prepared: worktrees `bdn-d82main` (b41fd1ca) and `d82base` (2373e273), both built Release.
+- Nothing running; main f74c25c0 pushed, CI green on ed333ada. D82 prepared: worktrees `bdn-d82main` (b41fd1ca) and `d82base` (2373e273), both built Release.
   Run `pwsh -File .scratch/d82/run-d82.ps1` detached (caps CPU at 4000 MHz and AC standby 0, runs the
   A-B-B-A `.scratch/d82/bdn-d82.ps1`, ~4.5 h, restores cap 0 and standby 30 min); log `.scratch/d82/run.log`. Peers: squiggle-mockups holds; future-ide no reply yet; general-questions is doing disk recovery and
   will send "recovery done, quiet from now" (expected ~23:30). Send all three "BDN done" after.
@@ -45,8 +44,6 @@ measurement, WPR profiles and benchmarks.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
-## Waiting on the owner
-
-- Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
+## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
 **Next action:** (1) when the peers are quiet, start D82 (In flight), record it in a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) meanwhile D99: write the four proof obligations of `2026-11-17-d99-continuation-keyed-call-memo.md`, build test-first in its own worktree, blind review before merge.
