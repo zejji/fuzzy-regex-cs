@@ -61,6 +61,23 @@ internal sealed class CallRefInfo
 
     /// <summary>Upstream <c>used</c>.</summary>
     internal bool Used;
+
+    /// <summary>
+    /// NOT UPSTREAM (D68): the <c>GROUP_RETURN</c> node <c>build_CALL_REF</c> made with
+    /// <see cref="Node"/>, where a call into this body returns.
+    /// </summary>
+    internal Node? ReturnNode;
+
+    /// <summary>
+    /// NOT UPSTREAM (D68): the groups (indices into <c>MatchState.Groups</c>) a call into this body
+    /// can write before it returns, ascending: its own groups and those of every body it calls.
+    /// A call saves and restores only these; every other group is the same at the return as at
+    /// the call. Set by <c>PatternObject.SetCallFrames</c>; every group where the walk cannot tell.
+    /// </summary>
+    internal int[] FrameGroups = [];
+
+    /// <summary>NOT UPSTREAM (D68): the repeats a call into this body can write, as <see cref="FrameGroups"/>.</summary>
+    internal int[] FrameRepeats = [];
 }
 
 /// <summary>
@@ -1686,6 +1703,9 @@ internal sealed class PatternObject
         // reads, once the nodes are numbered.
         SetLookaroundBodies(self);
 
+        // NOT UPSTREAM'S, D68: what each call's frame saves.
+        SetCallFrames(self);
+
         // NOT UPSTREAM'S, D124: see Node.HasVacuousDecision.
         if (self.IsFuzzy && !self.HasGroupCalls && !self.HasBacktrackingVerb && HasAtomicAndPositiveLookaround(self))
         {
@@ -2733,6 +2753,150 @@ internal sealed class PatternObject
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM'S, D68: sets each call reference's <see cref="CallRefInfo.FrameGroups"/> and
+    /// <see cref="CallRefInfo.FrameRepeats"/>.
+    /// </summary>
+    /// <remarks>
+    /// A group or repeat is written only by its own nodes (<c>START_GROUP</c>, <c>END_GROUP</c>, the
+    /// repeat nodes), by <c>UNKNOWN_CAPTURE</c> for a group in a lookaround body inside the call, or
+    /// by backtracking over those writes. So a call can change only what its body's nodes, and the
+    /// nodes of the bodies it calls, name. Each body is walked once to its own return; the call graph
+    /// is then closed. A body whose walk leaves it, or a call reference with no body, gets every
+    /// group and repeat, which is what every call saved before D68.
+    /// </remarks>
+    /// <param name="pattern">The pattern, with its nodes numbered.</param>
+    private static void SetCallFrames(PatternObject pattern)
+    {
+        List<CallRefInfo> refs = pattern.CallRefInfoList;
+        if (refs.Count == 0)
+        {
+            return;
+        }
+
+        int[] allGroups = [.. Enumerable.Range(0, pattern.TrueGroupCount)];
+        int[] allRepeats = [.. Enumerable.Range(0, pattern.RepeatCount)];
+        var groups = new HashSet<int>[refs.Count];
+        var repeats = new HashSet<int>[refs.Count];
+        var calls = new HashSet<int>[refs.Count];
+        var unknown = new bool[refs.Count];
+
+        // Each body on its own: a walk from its first node to its own return, through the nodes of
+        // groups defined inside it, without entering the bodies it calls.
+        for (int r = 0; r < refs.Count; r++)
+        {
+            groups[r] = [];
+            repeats[r] = [];
+            calls[r] = [];
+            if (refs[r].Node?.Next1.Node is not { } first || refs[r].ReturnNode is not { } end)
+            {
+                unknown[r] = true;
+                continue;
+            }
+
+            var seen = new HashSet<int>();
+            var todo = new Stack<Node>();
+            todo.Push(first);
+            while (todo.Count > 0)
+            {
+                Node n = todo.Pop();
+                if (ReferenceEquals(n, end) || !seen.Add(n.Index))
+                {
+                    continue;
+                }
+
+                switch (n.Op)
+                {
+                    case Opcode.End or Opcode.Success:
+                        // Past the body: the walk has left it, so it cannot say what the body writes.
+                        unknown[r] = true;
+                        break;
+                    case Opcode.StartGroup or Opcode.EndGroup:
+                        groups[r].Add((int)n.Values[0] - 1);
+                        break;
+                    case Opcode.GreedyRepeat
+                    or Opcode.LazyRepeat
+                    or Opcode.GreedyRepeatOne
+                    or Opcode.LazyRepeatOne
+                    or Opcode.EndGreedyRepeat
+                    or Opcode.EndLazyRepeat:
+                        repeats[r].Add((int)n.Values[0]);
+                        break;
+                    case Opcode.GroupCall:
+                        calls[r].Add((int)n.Values[0]);
+                        break;
+                }
+
+                foreach (Node? next in (ReadOnlySpan<Node?>)[n.Next1.Node, n.Next2.Node, n.TrueNode])
+                {
+                    if (next is not null)
+                    {
+                        todo.Push(next);
+                    }
+                }
+            }
+        }
+
+        // Then each body with everything it can call, directly or not.
+        for (int r = 0; r < refs.Count; r++)
+        {
+            var g = new HashSet<int>();
+            var rp = new HashSet<int>();
+            bool all = false;
+            var visited = new HashSet<int>();
+            var todo = new Stack<int>();
+            todo.Push(r);
+            while (todo.Count > 0 && !all)
+            {
+                int c = todo.Pop();
+                if (c < 0 || c >= refs.Count || unknown[c])
+                {
+                    all = true;
+                    break;
+                }
+
+                if (!visited.Add(c))
+                {
+                    continue;
+                }
+
+                g.UnionWith(groups[c]);
+                rp.UnionWith(repeats[c]);
+                foreach (int callee in calls[c])
+                {
+                    todo.Push(callee);
+                }
+            }
+
+            // An index out of range would mean the walk misread a node; take everything then.
+            int groupCount = pattern.TrueGroupCount;
+            int repeatCount = pattern.RepeatCount;
+            foreach (int i in g)
+            {
+                all |= i < 0 || i >= groupCount;
+            }
+
+            foreach (int i in rp)
+            {
+                all |= i < 0 || i >= repeatCount;
+            }
+
+            if (all)
+            {
+                refs[r].FrameGroups = allGroups;
+                refs[r].FrameRepeats = allRepeats;
+                continue;
+            }
+
+            int[] sortedGroups = [.. g];
+            int[] sortedRepeats = [.. rp];
+            Array.Sort(sortedGroups);
+            Array.Sort(sortedRepeats);
+            refs[r].FrameGroups = sortedGroups;
+            refs[r].FrameRepeats = sortedRepeats;
+        }
     }
 
     /// <summary>NOT UPSTREAM'S, D11 chunk 8: see <see cref="Node.BodyInfo"/>.</summary>

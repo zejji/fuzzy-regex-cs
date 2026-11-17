@@ -11,19 +11,24 @@ rows). What is left is a call the inliner keeps: a recursion, or a shape it refu
 
 Such a call costs time in proportion to every group and repeat in the pattern, whether or not its body
 can touch them. Matching each body with K extra groups that never take part (`(?:(x)y)?` repeated),
-Release, tiered compilation off, pinned to the performance cores, median of 3 runs (us per match):
+Release library, tiered compilation off, pinned to the performance cores, median of 8 runs taken in
+A-B-B-A and B-A-A-B order against the fix (us per match):
 
 | Body | K = 0 | 25 | 100 | 400 |
 |---|---|---|---|---|
-| `(\((?:[^()]\|(?1))*\))` over 30 nested pairs | 92 | 694 | 2,502 | 9,706 |
-| `((?:\((?:[^()]\|(?1))*\))+)` over 30 pairs in a row | 116 | 365 | 1,118 | 4,121 |
-| the same with no call | 62 | 68 | 84 | 149 |
-| the first under `{e<=1}` | 1,354 | 2,006 | 3,877 | 11,413 |
+| `(\((?:[^()]\|(?1))*\))` over 30 nested pairs | 17.3 | 110.3 | 402.1 | 1,637.9 |
+| `((?:\((?:[^()]\|(?1))*\))+)` over 30 pairs in a row | 23.1 | 60.4 | 175.7 | 666.4 |
+| the same with no call | 11.9 | 13.4 | 17.6 | 34.9 |
+| the first under `{e<=1}` | 114.2 | 214.2 | 523.3 | 1,810.1 |
 
-The call-free row is the ordinary cost of more groups (2.4x at K = 400). The recursive rows grow 36-105x.
-On the nested row that is about 0.8 us per group per call. A real pattern does not have 400 idle groups,
-but a recursive balanced-brackets group inside a 20-30 group pattern (a parser-style pattern, the main
-use of recursion) pays the same cost at a smaller scale: 694 against 92 us at K = 25.
+The call-free row is the ordinary cost of more groups (2.9x at K = 400). The recursive rows grow 29-95x.
+On the nested row that is about 0.13 us per group per call. A real pattern does not have 400 idle
+groups, but a recursive balanced-brackets group inside a 20-30 group pattern (a parser-style pattern,
+the main use of recursion) pays the same cost at a smaller scale: 110 against 17 us at K = 25.
+
+The first version of this table (2026-11-17 morning, also in the D68 row) timed a harness whose
+`#:property Configuration=Release` did not reach the library, which was built in Debug (92 / 694 /
+2,502 / 9,706 on the nested row). The shape was the same; the absolute numbers were 5-6x too high.
 
 ## Why every call copies everything
 

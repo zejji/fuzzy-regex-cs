@@ -635,6 +635,15 @@ internal sealed class MatchState : IDisposable
 
 #if DEBUG
     /// <summary>
+    /// NOT UPSTREAM'S, D68, Debug only: for each open call frame, by the saved-stack depth its return
+    /// node ends at, every group's count and current and every repeat's count and start when the
+    /// frame was pushed. <c>Matcher.DebugCheckCallFrame</c> asserts at the return that the groups and
+    /// repeats the frame did not save are unchanged, which is what saving only some of them rests on.
+    /// </summary>
+    /// <remarks>Made on first use, so a pattern without calls allocates nothing for it.</remarks>
+    internal Dictionary<int, (long[] Groups, long[] Repeats)>? DebugCallFrames;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11 M4, Debug only: set by <c>Matcher.ForkBudgetPartial</c>, so that
     /// <c>Matcher.BasicMatch</c> can assert that a partial returned with <see cref="ForkBudgetSpent"/>
     /// set is the budget's own (rule 10; chunk 9 fix round's re-review, finding 3).
@@ -1890,6 +1899,7 @@ internal sealed class MatchState : IDisposable
         HasUnknownCaptures = false;
 #if DEBUG
         Array.Clear(PartialEventCounts!);
+        DebugCallFrames?.Clear();
 #endif
         _pendingRunOutCause = null;
         DedupEntriesExamined = 0;
