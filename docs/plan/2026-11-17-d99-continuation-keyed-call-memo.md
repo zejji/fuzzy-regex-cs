@@ -132,7 +132,7 @@ timeout stop at different points. Almost all of the recurrence survives the stri
 captures and repeats do not eat the gain, and keeping the reach in the key costs about 3 points.
 The next section qualifies this: the off rules the proof needs remove most of it on the targeted rows.
 
-## Measured with the draft's key and off rules (2026-11-17, 22:30)
+## Measured with the draft's key and off rules (2026-11-17, 21:50)
 
 The proof draft below makes the key wider and turns the memo off in places, so the probe was rerun
 with those rules (`.scratch/d99/probe-full.diff` on main b41fd1ca, `.scratch/d99/measure2.cs`).

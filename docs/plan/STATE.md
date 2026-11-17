@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 22:35 by Claude Code (overnight: D99 proof draft in the design note; off rule measured; D82 waiting on a peer).
+**Updated:** 2026-11-17 21:55 by Claude Code (overnight: D99 proof draft in the design note; off rule measured; D82 waiting on a peer).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
