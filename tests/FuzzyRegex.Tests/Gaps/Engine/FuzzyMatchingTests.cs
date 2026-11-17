@@ -309,17 +309,18 @@ public sealed class FuzzyMatchingTests
     }
 
     [Test]
-    public void A_reverse_fuzzy_match_records_the_position_after_the_character_it_changed()
+    public void A_reverse_fuzzy_match_reports_the_position_of_the_character_it_changed()
     {
         // rev search('(?r)(?:[ab][cd]){e<=1}', 'ax'): span=(0, 2) counts=(1, 0, 0) changes=([2], [], [])
-        // Reverse: the step is -1, so 'new_text_pos - data.step' is one past the character rather
-        // than at it (:10245). The substituted 'x' is at index 1 and the recorded position is 2.
+        // Reverse: the step is -1, so upstream's 'new_text_pos - data.step' is one past the
+        // character rather than at it (:10245). The substituted 'x' is at index 1, which is what
+        // this port reports (D160; see ReverseChangePositionTests); upstream reports 2.
         Match m = new FuzzyRegex("(?r)(?:[ab][cd]){e<=1}").Match("ax");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 2));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        m.FuzzyChanges.Substitutions.Should().Equal(2);
+        m.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
 
         // rev search('(?r)(?:[ab][cd][ef]){e<=1}', 'zacx'): span=(1, 4) counts=(1, 0, 0)
         //   changes=([4], [], [])
@@ -327,7 +328,7 @@ public sealed class FuzzyMatchingTests
 
         (later.Index, later.Length).Should().Be((1, 3));
         later.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        later.FuzzyChanges.Substitutions.Should().Equal(4);
+        later.FuzzyChanges.Substitutions.Should().Equal(3); // upstream: 4 (D160)
     }
 
     [Test]
@@ -724,7 +725,7 @@ public sealed class FuzzyMatchingTests
         reversed.Success.Should().BeTrue();
         (reversed.Index, reversed.Length).Should().Be((3, 0));
         reversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        reversed.FuzzyChanges.Substitutions.Should().Equal(2);
+        reversed.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
         reversed.FuzzyChanges.Deletions.Should().BeEmpty();
 
         Match twoErrors = new FuzzyRegex("(?<=(?:abc){e<=2})$").Match("ac");
@@ -732,7 +733,7 @@ public sealed class FuzzyMatchingTests
         twoErrors.Success.Should().BeTrue();
         (twoErrors.Index, twoErrors.Length).Should().Be((2, 0));
         twoErrors.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
-        twoErrors.FuzzyChanges.Substitutions.Should().Equal(1);
+        twoErrors.FuzzyChanges.Substitutions.Should().Equal(0); // upstream: 1 (D160)
         twoErrors.FuzzyChanges.Deletions.Should().Equal(0);
 
         // THE CONTROLS, and they are what make the paragraph above a measurement rather than a
@@ -743,7 +744,7 @@ public sealed class FuzzyMatchingTests
         // winning attempt is its first).
         Match plainReversed = new FuzzyRegex("(?r)(?:[ab][cd]){e<=1}").Match("axc");
         plainReversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        plainReversed.FuzzyChanges.Substitutions.Should().Equal(2);
+        plainReversed.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
 
         Match lookahead = new FuzzyRegex("^(?=(?:[ab][cd]){e<=1})").Match("axc");
         lookahead.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
@@ -751,11 +752,11 @@ public sealed class FuzzyMatchingTests
 
         Match literalTail = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})q").Match("axcq");
         literalTail.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        literalTail.FuzzyChanges.Substitutions.Should().Equal(2);
+        literalTail.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
 
         Match literalTailLonger = new FuzzyRegex("(?<=(?:ab){e<=1})d").Match("axqayd");
         literalTailLonger.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        literalTailLonger.FuzzyChanges.Substitutions.Should().Equal(5);
+        literalTailLonger.FuzzyChanges.Substitutions.Should().Equal(4); // upstream: 5 (D160)
 
         // And with no lookaround at all, so the restart alone is not enough to leak: the failed
         // attempt at 0 unwinds its own change through the FUZZY backtrack arm on the way out.

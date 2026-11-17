@@ -7643,4 +7643,53 @@ it).
 
 **Not the same defect:** a reversed match reports a substitution's and an insertion's position one
 too high in both engines (`(?r)(?:ab){i<=1}` over 'a1b': insertion at [2], forward [1]; known defect
-D160, open).
+D160, entry 100).
+
+## 100. A reversed match reports a substitution or an insertion one character after the character it changed - DIVERGES HERE (D160, 2026-11-16)
+
+**Status:** DRAFT - NOT FILED, per the owner's rule. Known defect D160, found 2026-11-06 by the
+transpositions blind review. Evidence: `tools/probes/d160-change-position-rows.jsonl`;
+`tests/FuzzyRegex.Tests/Gaps/Engine/ReverseChangePositionTests.cs`.
+
+**Reproduction**, `regex` 2026.9.29 on Python 3.14, measured 2026-11-16 (`fuzzy_changes`, as
+substitutions, insertions, deletions):
+
+```
+search(r'(?:abc){s<=1}', 'adc')          -> ([1], [], [])
+search(r'(?r)(?:abc){s<=1}', 'adc')      -> ([2], [], [])        here ([1], [], [])
+search(r'(?:abcd){s<=2}', 'xbcy')        -> ([0, 3], [], [])
+search(r'(?r)(?:abcd){s<=2}', 'xbcy')    -> ([4, 1], [], [])     here ([3, 0], [], [])
+search(r'(?:ab){i<=1}', 'a1b')           -> ([], [1], [])
+search(r'(?r)(?:ab){i<=1}', 'a1b')       -> ([], [2], [])        here ([], [1], [])
+search(r'(?ir)(?:abc){i<=1}', 'AB1C')    -> ([], [3], [])        here ([], [2], []); forward [2]
+search(r'(?<=(?:abc){s<=1})d', 'axcd')   -> ([2], [], [])        here ([1], [], [])
+search(r'(?r)(?:abc){d<=1}', 'ac')       -> ([], [], [1])        in both, as forward
+fullmatch(r'(?r)(?:abc){e<=1}', 'abc1')  -> ([], [4], [])        here ([], [3], [])
+```
+
+**Why upstream is wrong.** README.rst (the fuzzy section) gives `fuzzy_changes` as the positions of
+the substitutions, insertions and deletions. A position is an index into the text, and reading the
+text backwards changes the same character, so the index cannot depend on the direction; upstream's
+own deletions, and every forward change, agree with that. 'xbcy' has no index 4.
+
+**Mechanism.** `fuzzy_match_item` (`_regex.c:10245`) and `retry_fuzzy_match_item` record
+`new_text_pos - data.step`, the position before the step; `fuzzy_match_string` (`:10483`) and the
+folded string and group paths record `state->text_pos`, the position the comparison had reached,
+before it moves; `retry_fuzzy_insert` and the trailing insertion at the end of a section record the
+same. Reading forwards the position before the step is the character's index. Reading backwards the
+character is at `pos - 1`, so the recorded index is one past it.
+
+**Proposed fix upstream:** not in the recording. The engine reads recorded positions back (the
+check that the last change is an insertion just made, and the fold paths' scan of the changes at
+the current position), so changing what is recorded changes matching. Record the direction with
+each change instead, and have `match_fuzzy_changes` report a backwards-read substitution or
+insertion one character back. No forward answer changes, and no match changes at all.
+
+**This port.** That fix: `FuzzyChange.ReadBackwards`, set at every record site, and
+`Match.ChangedCharacterPos`, which moves such a position back one code point (two code units for a
+surrogate pair). The recorded position stays upstream's, because the checks that read it back
+(`Matcher`, the insertion and fold checks) compare it with positions in upstream's form.
+`PatternObject.UpstreamChangePositions` reports upstream's position for the oracle: every ablation
+reports it, the entry `reversed-change-reported-after-its-character` is keyed on that switch alone,
+and a row no entry accounts for is judged again on the live answer in upstream's terms, so a row
+with this difference and another goes to the other's entry.

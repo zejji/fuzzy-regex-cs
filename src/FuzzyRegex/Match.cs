@@ -552,6 +552,13 @@ public sealed class Match : Group
     /// counts in code units throughout.
     /// </para>
     /// <para>
+    /// <b>A substitution or an insertion is reported at the index of the character it changed,
+    /// whichever way the pattern reads.</b> Under <see cref="FuzzyRegexOptions.RightToLeft"/> and
+    /// inside a lookbehind, upstream reports it one character after that, so a change at the last
+    /// character lies past the end of the subject there. See
+    /// <see href="https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md#a-reversed-match-reports-a-change-at-the-character-it-changed">the comparison page</see>.
+    /// </para>
+    /// <para>
     /// <b>A deletion's position is shifted by the deletions listed before it.</b> Upstream adds one
     /// to each deletion for every deletion before it in the list (<c>:20554-20557</c>), and this
     /// port adds one code unit. Deletions are listed in the order the part of the pattern that made
@@ -616,10 +623,10 @@ public sealed class Match : Group
             switch (change.Type)
             {
                 case Engine.FuzzyValue.Sub:
-                    substitutions.Add(change.Pos);
+                    substitutions.Add(ChangedCharacterPos(change));
                     break;
                 case Engine.FuzzyValue.Ins:
-                    insertions.Add(change.Pos);
+                    insertions.Add(ChangedCharacterPos(change));
                     break;
                 case Engine.FuzzyValue.Del:
                     deletions.Add(change.Pos + offset);
@@ -634,6 +641,33 @@ public sealed class Match : Group
         }
 
         return new FuzzyChanges(substitutions, insertions, deletions);
+    }
+
+    /// <summary>
+    /// NOT UPSTREAM (D160): the index of the character a substitution or an insertion changed,
+    /// whichever way the pattern read it.
+    /// </summary>
+    /// <remarks>
+    /// The engine records a change where upstream does, at the position the match stood on before it
+    /// stepped over the character (<see cref="Engine.FuzzyChange.Pos"/>), and reads it back in that
+    /// form. Reading forwards that is the character's index. Reading backwards it is the index after
+    /// it, so <c>(?r)(?:abc){s&lt;=1}</c> over 'adc' would report a substitution at 2 where forward
+    /// says 1, and a change at the last character would land past the end of the subject. One code
+    /// point back from it is the character's index, two code units for a surrogate pair.
+    /// <see cref="Engine.PatternObject.UpstreamChangePositions"/> reports upstream's position for the
+    /// oracle. Pinned by <c>Gaps/Engine/ReverseChangePositionTests.cs</c>.
+    /// </remarks>
+    /// <param name="change">A substitution or an insertion.</param>
+    /// <returns>The position to report.</returns>
+    private int ChangedCharacterPos(Engine.FuzzyChange change)
+    {
+        int pos = change.Pos;
+        if (!change.ReadBackwards || pos <= 0 || _regex.PatternObject.UpstreamChangePositions)
+        {
+            return pos;
+        }
+
+        return pos >= 2 && char.IsSurrogatePair(_subject[pos - 2], _subject[pos - 1]) ? pos - 2 : pos - 1;
     }
 
     /// <summary>

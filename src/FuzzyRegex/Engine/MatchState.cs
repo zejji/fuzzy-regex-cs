@@ -28,16 +28,29 @@ internal readonly record struct GroupSpan(int Start, int End);
 /// (<c>upstream/src/_regex.c</c> lines 392-395).
 /// </summary>
 /// <remarks>
+/// <para>
 /// <see cref="Pos"/> is a UTF-16 code unit index, like every other position in the engine; upstream's
 /// is a codepoint index. For a substitution or an insertion it is a real position in the subject; for
 /// a deletion it is where the missing character would have gone, which <c>match_fuzzy_changes</c>
 /// (<c>:20555-20558</c>) then shifts by one per earlier deletion, so the reported value can be past the end
 /// of the match.
+/// </para>
+/// <para>
+/// <see cref="Pos"/> is where upstream records the change: the position the match stood on before it
+/// stepped over the character. The engine reads it back in that form (the insertion and fold checks
+/// in <c>Matcher</c>), so it stays upstream's. Reading backwards it is the index after the character;
+/// <see cref="ReadBackwards"/> says which way the change was read, and <c>Match</c> reports such a
+/// substitution or insertion at the character's own index (D160).
+/// </para>
 /// </remarks>
 /// <param name="Type">Which error: <see cref="FuzzyValue.Sub"/>, <c>Ins</c> or <c>Del</c>.</param>
 /// <param name="Pos">Where it was used.</param>
+/// <param name="ReadBackwards">
+/// NOT UPSTREAM (D160): whether the change was made reading the text backwards, under
+/// <c>RightToLeft</c> or in a lookbehind.
+/// </param>
 [StructLayout(LayoutKind.Auto)]
-internal readonly record struct FuzzyChange(byte Type, int Pos);
+internal readonly record struct FuzzyChange(byte Type, int Pos, bool ReadBackwards);
 
 /// <summary>
 /// NOT UPSTREAM'S (D93): the fuzzy section a group call was made in, as the call guard compares it
@@ -3033,8 +3046,12 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>record_fuzzy</c> (line 9768), less its hand-grown array growth.</summary>
     /// <param name="fuzzyType">Which error was used.</param>
     /// <param name="textPos">Where it was used.</param>
-    internal void RecordFuzzy(int fuzzyType, int textPos) =>
-        FuzzyChanges.Add(new FuzzyChange((byte)fuzzyType, textPos));
+    /// <param name="readBackwards">
+    /// NOT UPSTREAM (D160): whether the item that made it reads the text backwards; see
+    /// <see cref="FuzzyChange.ReadBackwards"/>.
+    /// </param>
+    internal void RecordFuzzy(int fuzzyType, int textPos, bool readBackwards) =>
+        FuzzyChanges.Add(new FuzzyChange((byte)fuzzyType, textPos, readBackwards));
 
     /// <summary>Upstream <c>unrecord_fuzzy</c> (line 9801), which is <c>--count</c>.</summary>
     /// <remarks>

@@ -383,9 +383,9 @@ public sealed class FuzzyBestMatchTests
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 4));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        m.FuzzyChanges.Substitutions.Should().Equal(4);
+        m.FuzzyChanges.Substitutions.Should().Equal(3); // upstream: 4 (D160)
         // Upstream records 2 here; its own flagless engine records 1, as this port does.
-        m.FuzzyChanges.Insertions.Should().Equal(1);
+        m.FuzzyChanges.Insertions.Should().Equal(0); // upstream: 1 (D160)
 
         // The control: with the flag deleted both engines record the insertion at 1.
         Match plain = new FuzzyRegex(@"(?r)\m(?:.fo){e<=2}").Match("x fx");
@@ -393,8 +393,8 @@ public sealed class FuzzyBestMatchTests
         plain.Success.Should().BeTrue();
         (plain.Index, plain.Index + plain.Length).Should().Be((0, 4));
         plain.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
-        plain.FuzzyChanges.Substitutions.Should().Equal(4);
-        plain.FuzzyChanges.Insertions.Should().Equal(1);
+        plain.FuzzyChanges.Substitutions.Should().Equal(3); // upstream: 4 (D160)
+        plain.FuzzyChanges.Insertions.Should().Equal(0); // upstream: 1 (D160)
 
         // And the ablation that says the reverse match is part of the shape: forwards, the two
         // engines agree on a different match entirely, at two substitutions and no insertion.

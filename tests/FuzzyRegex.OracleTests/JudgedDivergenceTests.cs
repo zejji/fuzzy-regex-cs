@@ -36,8 +36,13 @@ public sealed class JudgedDivergenceTests
 
         foreach (JudgedRow judged in JudgedDivergences.All)
         {
+            // In upstream's terms for change positions (D160). Every judged answer was stored before
+            // this port reported a reversed change at the character, the switch moves nothing else,
+            // and on one row (534479534/24561) the live answer even equals upstream's by coincidence:
+            // upstream's lookbehind substitution at 4 is a leak from a failed attempt (ledger 11),
+            // this port's 4 is the character it changed.
             IOracleOutcome ours = OracleComparer
-                .Run(judged.Row, TimeSpan.FromSeconds(10))
+                .RunReportingUpstreamChangePositions(judged.Row)
                 .Should()
                 .NotBeNull("{0}: a judged row must be one this port answers", judged.Source)
                 .And.Subject.Should()

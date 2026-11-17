@@ -1239,9 +1239,22 @@ internal sealed class PatternObject
     }
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a substitution or an insertion is
+    /// reported where upstream reports it, the position the match stood on before it stepped over
+    /// the character, which for a match reading backwards is one character after it (D160). The
+    /// oracle sets it on a pattern it compiled for an ablation, since upstream has none of this
+    /// port's fixes. See <c>Match.ChangedCharacterPos</c>.
+    /// </summary>
+    internal bool UpstreamChangePositions
+    {
+        get => (_oracleSwitches & OracleSwitches.UpstreamChangePositions) != OracleSwitches.None;
+        set => SetOracleSwitch(OracleSwitches.UpstreamChangePositions, value);
+    }
+
+    /// <summary>
     /// The oracle-only switches <see cref="UpstreamConditionalRestore"/>,
-    /// <see cref="MaximaAsBeforeD133"/>, <see cref="UpstreamCopyEndIndex"/> and
-    /// <see cref="UpstreamFuzzyTestArms"/>, in one byte: a bool
+    /// <see cref="MaximaAsBeforeD133"/>, <see cref="UpstreamCopyEndIndex"/>,
+    /// <see cref="UpstreamFuzzyTestArms"/> and <see cref="UpstreamChangePositions"/>, in one byte: a bool
     /// field of its own for D133 grew every compiled pattern by 8 bytes (<c>AllocationTests</c>,
     /// 2026-11-02).
     /// </summary>
@@ -1271,6 +1284,9 @@ internal sealed class PatternObject
 
         /// <summary><see cref="UpstreamFuzzyTestArms"/>.</summary>
         UpstreamFuzzyTestArms = 8,
+
+        /// <summary><see cref="UpstreamChangePositions"/>.</summary>
+        UpstreamChangePositions = 16,
     }
 
     /// <summary>

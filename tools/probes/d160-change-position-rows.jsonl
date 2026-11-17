@@ -1,0 +1,6 @@
+{"pattern": "(?r)(?:abc){s<=1}", "flags": 0, "subject": "adc", "operation": "fullmatch"}
+{"pattern": "(?r)(?:abcd){s<=2}", "flags": 0, "subject": "xbcy", "operation": "search"}
+{"pattern": "(?r)(?:ab){i<=1}", "flags": 0, "subject": "a1b", "operation": "search"}
+{"pattern": "(?r)(?:abc){e<=1}", "flags": 0, "subject": "abc1", "operation": "fullmatch"}
+{"pattern": "(?ir)(?:abc){i<=1}", "flags": 0, "subject": "AB1C", "operation": "search"}
+{"pattern": "(?<=(?:abc){s<=1})d", "flags": 0, "subject": "axcd", "operation": "search"}

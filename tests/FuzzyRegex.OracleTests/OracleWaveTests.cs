@@ -626,6 +626,19 @@ public sealed class OracleWaveTests
                     .BeAssignableTo<IOracleOutcome>()
                     .Subject;
 
+                // D160: where the live answer agrees with upstream only because this port reports a
+                // reversed change at the character and upstream's leaked position happens to be the
+                // same number (judged row 534479534/24561), the row still diverges in upstream's
+                // terms, and that is the answer its entry stored.
+                if (
+                    OracleComparer.Compare(row, ours) == OracleVerdict.Agree
+                    && OracleComparer.RunReportingUpstreamChangePositions(row) is { } reported
+                    && OracleComparer.Compare(row, reported) != OracleVerdict.Agree
+                )
+                {
+                    ours = reported;
+                }
+
                 // A judged crash row has no upstream answer to diverge from; it is a FAULT that the
                 // judged-row entry claims (JudgedDivergences).
                 OracleComparer

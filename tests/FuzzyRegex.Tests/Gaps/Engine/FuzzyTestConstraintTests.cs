@@ -240,7 +240,7 @@ public sealed class FuzzyTestConstraintTests
         // char-rev-no: counts=(0, 0, 1) changes=([], [], [2])
         Match charRevOk = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$").Match("axc");
         charRevOk.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        charRevOk.FuzzyChanges.Substitutions.Should().Equal(2);
+        charRevOk.FuzzyChanges.Substitutions.Should().Equal(1); // upstream: 2 (D160)
 
         Match charRevNo = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$").Match("azc");
         charRevNo.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));

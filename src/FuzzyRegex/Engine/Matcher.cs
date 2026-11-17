@@ -12134,7 +12134,7 @@ internal static class Matcher
 
         /* bstack: node step text_pos fuzzy_type op */
 
-        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
+        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data), data.Step < 0);
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -12318,7 +12318,7 @@ internal static class Matcher
 
         /* bstack: node step text_pos fuzzy_type op */
 
-        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
+        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data), data.Step < 0);
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -12422,7 +12422,7 @@ internal static class Matcher
 
         /* bstack: step text_pos count node FUZZY_INSERT */
 
-        state.RecordFuzzy(FuzzyValue.Ins, Step(state, state.TextPos, (sbyte)-step));
+        state.RecordFuzzy(FuzzyValue.Ins, Step(state, state.TextPos, (sbyte)-step), step < 0);
 
         ++state.FuzzyCounts[FuzzyValue.Ins];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -12505,7 +12505,7 @@ internal static class Matcher
         // Upstream records the position the comparison had reached, not 'new_text_pos - step' the
         // way the single-item path does (:10483 against :10245): a string charges the error where it
         // stopped, whatever kind of error it turned out to be.
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(data.FuzzyType, state.TextPos, data.Step < 0);
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -12614,7 +12614,7 @@ internal static class Matcher
         state.Bstack.PushUInt8(kinds == FuzzyValue.Count ? (byte)data.FuzzyType : _exactInsertionDone);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+        state.RecordFuzzy(data.FuzzyType, state.TextPos, data.Step < 0);
 
         /* bstack: node step string_pos text_pos fuzzy_type op */
 
@@ -12646,7 +12646,7 @@ internal static class Matcher
                 state.Bstack.PushUInt8((byte)FuzzyValue.Del);
                 state.Bstack.PushUInt8(op);
 
-                state.RecordFuzzy(FuzzyValue.Del, state.TextPos);
+                state.RecordFuzzy(FuzzyValue.Del, state.TextPos, data.Step < 0);
                 ++fuzzyCounts[FuzzyValue.Del];
                 state.CaptureChange += MatchState.FuzzyEditChange;
             }
@@ -13391,7 +13391,7 @@ internal static class Matcher
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
-        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos, data.Step < 0);
 
         ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -13543,7 +13543,7 @@ internal static class Matcher
         state.Bstack.PushUInt8(pushedType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos, data.Step < 0);
 
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
@@ -14035,7 +14035,7 @@ internal static class Matcher
          * fuzzy_type op
          */
 
-        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos, data.Step < 0);
 
         ++fuzzyCounts[FoldCountedAs(data.FuzzyType)];
         state.CaptureChange += MatchState.FuzzyEditChange;
@@ -14219,7 +14219,7 @@ internal static class Matcher
         state.Bstack.PushUInt8(pushedType);
         state.Bstack.PushUInt8(op);
 
-        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos);
+        state.RecordFuzzy(FoldCountedAs(data.FuzzyType), state.TextPos, data.Step < 0);
 
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type op
@@ -19464,7 +19464,7 @@ internal static class Matcher
 
             if (state.TextPos != endFuzzyLimit && FuzzyExtMatch(state, innerNode, state.TextPos))
             {
-                state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
+                state.RecordFuzzy(FuzzyValue.Ins, state.TextPos, endFuzzyReverse);
                 ++innerCounts[FuzzyValue.Ins];
 
                 state.TextPos = Step(state, state.TextPos, endFuzzyReverse ? -1 : 1);

@@ -3112,6 +3112,22 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The rows of <c>reversed-change-reported-after-its-character</c> (D160), recorded 2026-11-16 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/d160-change-position-rows.jsonl</c>: a
+    /// reversed substitution, two of them, an insertion, an insertion at the end a reversed
+    /// fullmatch reads first, an insertion in a case-folded string, and a substitution in a
+    /// lookbehind.
+    /// </summary>
+    private const string _reversedChangePositionRows = """
+        {"generator": "rows", "pattern": "(?r)(?:abc){s<=1}", "flags": 0, "namedLists": {}, "subject": "adc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:abcd){s<=2}", "flags": 0, "namedLists": {}, "subject": "xbcy", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [4, 1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [4, 1], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:ab){i<=1}", "flags": 0, "namedLists": {}, "subject": "a1b", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?r)(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "abc1", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?ir)(?:abc){i<=1}", "flags": 0, "namedLists": {}, "subject": "AB1C", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?<=(?:abc){s<=1})d", "flags": 0, "namedLists": {}, "subject": "axcd", "operation": "search", "codepointSpan": [3, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        """;
+
+    /// <summary>
     /// The rows of <c>fuzzy-test-without-an-upstream-arm-allows-every-error</c> (D155), recorded
     /// 2026-11-16 by
     /// <c>python tools/record-oracle.py --rows tools/probes/d155-fuzzy-test-arm-rows.jsonl</c>: a
@@ -3748,6 +3764,36 @@ internal static class ExpectedDivergences
 
     private static readonly ExpectedDivergence[] _entries =
     [
+        // First of all: every ablation reports upstream's change positions (OracleComparer.Run), so
+        // any ablation entry would reproduce upstream on a row whose only difference is D160's. Its
+        // own ablation is the position switch alone, so it claims only those rows; a row with D160's
+        // difference and another is the other entry's, judged on the live answer in upstream's terms
+        // (For).
+        new(
+            Id: "reversed-change-reported-after-its-character",
+            Reason: "PORT RIGHT, D160 (ledger entry 100): a change position is an index into the text, "
+                + "so it cannot depend on which way the pattern reads it. Upstream records a "
+                + "substitution or an insertion where the match stood before it stepped over the "
+                + "character (`new_text_pos - step` in `fuzzy_match_item`, `_regex.c:10245`; the "
+                + "comparison's position in `fuzzy_match_string`, `:10483`), which reading backwards is "
+                + "the index after the character: `(?r)(?:abc){s<=1}` over 'adc' reports a substitution "
+                + "at 2 where forward reports 1, and `(?r)(?:abcd){s<=2}` over 'xbcy' reports [4, 1], "
+                + "past the end of the text. This port reports the character's own index "
+                + "(`Match.ChangedCharacterPos`; the engine still records upstream's position, which "
+                + "it reads back). Deletions agree already.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunReportingUpstreamChangePositions`, the live run with "
+                + "`PatternObject.UpstreamChangePositions` set and nothing else, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged.",
+            PinnedBy: "Gaps.Engine.ReverseChangePositionTests",
+            Example: _reversedChangePositionRows,
+            // The live answer itself, never its upstream-terms form, which IsTheLiveAnswer also
+            // accepts: that form already has upstream's positions, so it is the other entries' to judge.
+            Applies: static (row, ours) =>
+                OracleComparer.Run(row) is { } live
+                && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal)
+                && OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunReportingUpstreamChangePositions(row))
+        ),
         // Before every ablation entry: its rows are keyed on this port's exact answer, and its
         // ablation turns off D102 and D109 alone, so it explains only a row they explain.
         new(
@@ -8573,7 +8619,24 @@ internal static class ExpectedDivergences
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(ours);
 
-        return Array.Find(_entries, entry => entry.Applies(row, ours));
+        ExpectedDivergence? found = Array.Find(_entries, entry => entry.Applies(row, ours));
+        if (found is not null)
+        {
+            return found;
+        }
+
+        // D160: the live answer reports a reversed change at the character, upstream after it.
+        // Judged again in upstream's terms, a row whose divergence is that and something else is
+        // the something else's, and an answer stored before D160 still matches. Only for the live
+        // answer itself, so a test's made-up answer is never swapped for a re-run.
+        IOracleOutcome? reported = OracleComparer.RunReportingUpstreamChangePositions(row);
+        return
+            reported is not null
+            && !string.Equals(reported.Describe(), ours.Describe(), StringComparison.Ordinal)
+            && OracleComparer.Run(row) is { } live
+            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal)
+            ? Array.Find(_entries, entry => entry.Applies(row, reported))
+            : null;
     }
 
     /// <summary>Upstream's <c>IGNORECASE</c> flag bit, which is <c>regex.I</c>.</summary>
@@ -8921,8 +8984,14 @@ internal static class ExpectedDivergences
                 StringComparison.Ordinal
             )
         )
-        && OracleComparer.Run(row) is { } live
-        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+        && (
+            OracleComparer.Run(row) is { } live
+                && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal)
+            // D160: or the live answer as upstream reports change positions, which is what
+            // ExpectedDivergences.For judges a row on when the live answer is not accounted for.
+            || OracleComparer.RunReportingUpstreamChangePositions(row) is { } reported
+                && string.Equals(reported.Describe(), ours.Describe(), StringComparison.Ordinal)
+        );
 
     /// <summary>
     /// Whether rule H' (D61, which replaced S57c's anchor pin) is the whole of the difference between

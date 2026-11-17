@@ -140,7 +140,7 @@ public sealed class FuzzyEnhanceMatchTests
         reverse.Success.Should().BeTrue();
         (reverse.Index, reverse.Length).Should().Be((0, 3));
         reverse.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        reverse.FuzzyChanges.Substitutions.Should().Equal(3);
+        reverse.FuzzyChanges.Substitutions.Should().Equal(2); // upstream: 3 (D160)
     }
 
     [Test]

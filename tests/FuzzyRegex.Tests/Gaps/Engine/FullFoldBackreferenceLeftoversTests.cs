@@ -193,7 +193,7 @@ public sealed class FullFoldBackreferenceLeftoversTests
         reverse.Success.Should().BeTrue();
         (reverse.Index, reverse.Length).Should().Be((0, 5));
         reverse.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
-        reverse.FuzzyChanges.Insertions.Should().Equal(3);
+        reverse.FuzzyChanges.Insertions.Should().Equal(2); // upstream: 3 (D160)
     }
 
     [Test]

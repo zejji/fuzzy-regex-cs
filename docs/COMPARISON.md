@@ -1537,6 +1537,26 @@ A test that is a single character or a single range, such as `[x]` or `[x-z]`, a
 same on both, because upstream compiles it to an item it does check. There is no option to restore
 the upstream answer.
 
+### A reversed match reports a change at the character it changed
+
+`FuzzyChanges` says where a fuzzy match substituted, inserted or deleted a character. In a pattern
+that reads the text backwards, under `RightToLeft` or inside a lookbehind, upstream reports a
+substitution or an insertion one position after the character it changed, so a change to the last
+character is reported past the end of the text. Here a change is reported at the character's own
+index, whichever way the pattern reads.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// "d" stands in for "b", at index 1, read forwards or backwards.
+Match m = FuzzyRegex.FullMatch("adc", @"(?r)(?:abc){s<=1}");
+Console.WriteLine(string.Join(", ", m.FuzzyChanges.Substitutions));   // 1 - upstream: 2
+```
+
+Deletions already agreed, since a deletion takes no character. The lists keep the order the match
+made the changes in, so a reversed match still lists them right to left. There is no option to
+restore the upstream answer.
+
 ### A fuzzy repeat takes an iteration that matches no text by deleting only when something needs it
 
 Inside a repeat, a fuzzy pattern can match nothing at all by leaving out every character of the
