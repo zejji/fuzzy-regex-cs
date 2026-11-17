@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 22:20 by Claude Code (overnight session: D99 recurrence refined; D82 run prepared, waiting on a peer).
+**Updated:** 2026-11-17 22:35 by Claude Code (overnight: D99 proof draft in the design note; off rule measured; D82 waiting on a peer).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -46,4 +46,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when the peers are quiet, start D82 (In flight), record it in a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) meanwhile D99: write the four proof obligations of `2026-11-17-d99-continuation-keyed-call-memo.md`, build test-first in its own worktree, blind review before merge.
+**Next action:** (1) when general-questions sends "recovery done", start D82 (In flight; my own probes stop first), record it in a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) D99: count only open repeats in the off rule (probe in `.claude/worktrees/d99m`, diff `.scratch/d99/probe-full.diff`), then choose: key the repeat-start state or accept the witness-shaped gain; then blind review of the proof draft, build test-first.
