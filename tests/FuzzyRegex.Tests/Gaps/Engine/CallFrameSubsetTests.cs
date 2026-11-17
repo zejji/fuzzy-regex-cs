@@ -10,7 +10,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// <remarks>
 /// <para>
 /// Measured 2026-11-17 (<c>tools/probes/d68-call-perf/recursion.cs</c>): <c>(\((?:[^()]|(?1))*\))</c>
-/// over 30 nested pairs took 92 us, and 9,706 us with 400 groups that never take part appended
+/// over 30 nested pairs took 17.3 us, and 1,638 us with 400 groups that never take part appended
 /// to the pattern, because each of the 30 calls copied all 401 groups and back. Design:
 /// <c>docs/plan/2026-11-17-d68-call-frame-subset-design.md</c>, option A.
 /// </para>

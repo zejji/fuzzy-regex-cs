@@ -5260,23 +5260,42 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to push onto.</param>
-    private static void PushRepeats(MatchState state, ByteStack stack) => PushRepeats(state, stack, null);
+    private static void PushRepeats(MatchState state, ByteStack stack)
+    {
+        bool runs = state.Pattern.TestedGroups.Length > 0;
+        for (int r = 0; r < state.Repeats.Length; r++)
+        {
+            bool keepGuards = state.KeepsFailureMemo(r);
+
+            // The proof's premises (see the remarks): a memo pattern has no group call, the only
+            // other caller, and is not fuzzy. PartialSide, the call's half of KeepsFailureMemo,
+            // changes only between the two passes of a partial call (DoMatch), and each pass starts
+            // from empty stacks (MatchState.InitMatch), so the pop sees the value the push did.
+            Debug.Assert(
+                !keepGuards || (!state.Pattern.HasGroupCalls && !state.IsFuzzy),
+                "a failure-memo repeat is never saved by a group call or in a fuzzy pattern"
+            );
+            PushRepeatData(stack, state.Repeats[r], state.IsFuzzy, runs, keepGuards);
+        }
+
+        // NOT UPSTREAM (ledger entry 44's addendum): the optional passes' slots, which a call
+        // must not see changed when it returns; see OpenOptionalPass.
+        stack.PushBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan()));
+    }
 
     /// <summary>
     /// <see cref="PushRepeats(MatchState, ByteStack)"/> for the repeats in <paramref name="only"/>,
-    /// ascending, or every repeat where it is <see langword="null"/>. NOT UPSTREAM (D68): a group
+    /// ascending. NOT UPSTREAM (D68): a group
     /// call saves only the repeats its body can write (<see cref="CallRefInfo.FrameRepeats"/>).
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="stack">The stack to push onto.</param>
-    /// <param name="only">The repeats, or <see langword="null"/> for all.</param>
-    private static void PushRepeats(MatchState state, ByteStack stack, int[]? only)
+    /// <param name="only">The repeats.</param>
+    private static void PushRepeats(MatchState state, ByteStack stack, int[] only)
     {
         bool runs = state.Pattern.TestedGroups.Length > 0;
-        int saved = only?.Length ?? state.Repeats.Length;
-        for (int i = 0; i < saved; i++)
+        foreach (int r in only)
         {
-            int r = only is null ? i : only[i];
             bool keepGuards = state.KeepsFailureMemo(r);
 
             // The proof's premises (see the remarks): a memo pattern has no group call, the only
@@ -5373,8 +5392,38 @@ internal static class Matcher
     /// after the return whether the call returns again or fails.
     /// </param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded, bool keepSuccessMarks) =>
-        PopRepeats(state, stack, testJustEnded, keepSuccessMarks, null);
+    private static bool PopRepeats(MatchState state, ByteStack stack, bool testJustEnded, bool keepSuccessMarks)
+    {
+        Debug.Assert(
+            !(keepSuccessMarks && testJustEnded),
+            "D121: success marks are kept only where something after the test has run since the push"
+        );
+        bool runs = state.Pattern.TestedGroups.Length > 0;
+        if (!stack.PopBlock(MemoryMarshal.AsBytes(state.OptionalPasses.AsSpan())))
+        {
+            return false;
+        }
+
+        for (int r = state.Repeats.Length - 1; r >= 0; r--)
+        {
+            if (
+                !PopRepeatData(
+                    stack,
+                    state.Repeats[r],
+                    state.IsFuzzy,
+                    runs,
+                    state.KeepsFailureMemo(r),
+                    testJustEnded,
+                    keepSuccessMarks
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// <see cref="PopRepeats(MatchState, ByteStack, bool, bool)"/> for the repeats in
@@ -5384,14 +5433,14 @@ internal static class Matcher
     /// <param name="stack">The stack to pop from.</param>
     /// <param name="testJustEnded">As for the overload without <paramref name="only"/>.</param>
     /// <param name="keepSuccessMarks">As for the overload without <paramref name="only"/>.</param>
-    /// <param name="only">The repeats, or <see langword="null"/> for all.</param>
+    /// <param name="only">The repeats.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeats(
         MatchState state,
         ByteStack stack,
         bool testJustEnded,
         bool keepSuccessMarks,
-        int[]? only
+        int[] only
     )
     {
         Debug.Assert(
@@ -5404,9 +5453,9 @@ internal static class Matcher
             return false;
         }
 
-        for (int i = (only?.Length ?? state.Repeats.Length) - 1; i >= 0; i--)
+        for (int i = only.Length - 1; i >= 0; i--)
         {
-            int r = only is null ? i : only[i];
+            int r = only[i];
             if (
                 !PopRepeatData(
                     stack,
@@ -20348,7 +20397,7 @@ internal static class Matcher
         // NOT UPSTREAM'S (D68): only the groups and repeats the called body can write
         // (CallRefInfo.FrameGroups and FrameRepeats), where upstream saves every one. A
         // recursion in a pattern with 400 other groups copied all of them at every call,
-        // 105x the cost without them; everything outside the lists is unchanged at the
+        // 95x the cost without them; everything outside the lists is unchanged at the
         // return (DebugCheckCallFrame). The call reference is pushed so every reader of
         // the frame finds the same lists. docs/plan/2026-11-17-d68-call-frame-subset-design.md.
         CallRefInfo groupCallFrame = pattern.CallRefInfoList[groupCallIndex];
