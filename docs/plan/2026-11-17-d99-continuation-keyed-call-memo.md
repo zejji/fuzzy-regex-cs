@@ -84,3 +84,28 @@ counts) with an earlier entry whose continuation is equal. If the answer is "alm
 witness", the memo is a lot of proof for one pathological row, and D99 should be closed as accepted
 with the witness kept as a step bound. If it is common in fuzzy patterns with recursion (the hot path
 the owner cares about), build it test-first with the proof above reviewed blind before merging.
+
+## Measured: how often equal continuations recur (2026-11-17)
+
+A scratch build (never merged; `.scratch/d99-instrument.py`, `.scratch/d99/measure.cs`) counted, at
+every call entry, whether an earlier entry in the same match had the same call, position, fuzzy counts,
+partial side and stack of pending return nodes. That ignores captures and repeat state, so it is an
+upper bound on what the memo could reuse:
+
+| Corpus | Rows that make a real call | Call entries | Repeated |
+|---|---|---|---|
+| The D99 witness | 1 | 3,806 | 3,746 (98%) |
+| D93's 30,000 targeted call-in-one-fuzzy-section rows (`d93/calls.jsonl`) | 20,609 | 2,762,546 | 2,561,164 (92.7%) |
+| the battery's call rows (`d93/battery.jsonl`), all | 2,555 | 104,922 | 95,008 (90.6%) |
+| the same, fuzzy rows only | 866 | 98,594 | 94,164 (95.5%) |
+| oracle wave seed 20261116 | 10 | 64 | 0 |
+
+Calls the inliner removes do not appear (most of the wave's call rows), and no non-fuzzy row repeats
+much. Fuzzy recursion repeats almost every call: the worst targeted row makes 607,307 calls over a
+14-character text, 606,859 of them repeats. So the condition the recommendation set is met: equal
+continuations are the common case in fuzzy patterns with recursion, not only on the witness.
+
+**Updated recommendation: build it**, test-first, in its own worktree, with the four proof
+obligations above written before the code and reviewed blind before merging. First step: refine the
+measurement key with the caller state the continuation reads (captures read after a return, open
+repeats' counts) to see how much of the 92.7% survives; that sets the gain the build can claim.

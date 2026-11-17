@@ -43,4 +43,4 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. (Transpositions design fully decided 2026-11-14; parked post-1.3.)
 
-**Next action:** D99: measure how often call entries with equal (call, position, counts) and equal continuations recur on the oracle's call rows and the ported call tests (design note's recommendation); build only if common. Else D123. D82 full BDN still waits for LibreHardwareMonitor (owner).
+**Next action:** D99: refine the recurrence key with the caller state the continuation reads (captures, open repeats) to size the gain; then write the four proof obligations of `2026-11-17-d99-continuation-keyed-call-memo.md` and build test-first in its own worktree, blind review before merge. D82 full BDN still waits for LibreHardwareMonitor (owner).
