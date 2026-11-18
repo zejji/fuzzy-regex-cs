@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 06:12 by Claude Code (overnight: D99 gated, uncommitted (RAM gate); D164/D165 judged port right, uncommitted).
+**Updated:** 2026-11-18 06:16 by Claude Code (overnight end: D164/D165 merged; D99 gated, waiting on the RAM gate to commit).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -40,11 +40,11 @@ measurement, WPR profiles and benchmarks.
   the 12 GB commit gate. Backup `.scratch/d99b/wip-fix2-0548.patch` + `wip-untracked/`. Witness 76,446 to 4,367
   steps; deep recursion within 3-10% of memo-off (`.scratch/d99v/deep2.cs`); ratchet GREEN 10,397; oracle 3 seeds:
   only D164/D165; 0 diffs vs main; blind reviews `.scratch/d99r*/`: no wrong answer. Open: why a pending call's section frame can be off the chain (FrameIndex -2; the memo switches off there).
-- D164/D165 judged (a) port right (F153: ledger 43 + 95; F154: D11 + ledger 11), Python witnesses re-checked; patch
-  `.scratch/judge-c/wip-0611.patch` for `.claude/worktrees/judge-c` (uncommitted, RAM gate). Tooling gap: `tools/judge-row.py`
-  records reversed fuzzy change positions in port terms, `JudgedDivergenceTests` wants upstream terms (D160); fix the tool.
+- D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
+  `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
+  upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when free RAM >= 12 GB: commit D99 (`perf/d99-continuation-memo`) and judge-c (`test/judge-c-oracle-rows`) under the commit lock, merge both, ratchet + oracle on main, D99 row to F; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: WPR profile of `UncachedIsMatch`, design note with options.
+**Next action:** (1) when free RAM >= 12 GB: commit D99 (`perf/d99-continuation-memo`) under the commit lock, merge, ratchet + oracle on main, D99 row to F; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: WPR profile of `UncachedIsMatch`, design note with options.
