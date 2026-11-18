@@ -41,6 +41,9 @@ measurement, WPR profiles and benchmarks.
   `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` end with an EXIT line. Expected: ratchet GREEN
   10,397; oracle diverging only on D164/D165 (judged rows, now EXPECTED). Then: D99 row to F155, worktree d99b
   removed, push needs the owner. Open: FrameIndex -2 mechanism (memo switches off there), see the design note.
+- Next action (2) started 09:45 in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted): DIVERGE
+  blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
+  C# test `A_divergence_block_also_gives_the_port_answer_in_upstreams_change_positions` not yet built (waits for RAM).
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
