@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 02:09 by Claude Code (overnight: D163 bisected; D99 blind review running).
+**Updated:** 2026-11-18 02:23 by Claude Code (overnight: D99 builder running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -37,11 +37,14 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - D163 bisected (row): worktree `.claude/worktrees/d163` kept for the profile; sampler `.scratch/d163/types.cs`.
-- D99 blind design review (Opus subagent) writing `.scratch/d99/blind-review.md`; read it before building.
+- D99 builder (Opus subagent) on `perf/d99-continuation-memo`, worktree `.claude/worktrees/d99b`, brief
+  `.claude/driver/brief-d99-continuation-memo-2026-11-18.md` (local), status `.scratch/d99b/status.txt`.
+  Audit mode first; stops on any unexplained counterexample. If the session ends, check the worktree's
+  WIP commits and status, then relaunch from the brief.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D99: act on the blind review, then build K test-first in its own worktree, audit mode first (design note "Keying the repeat-start state"); (2) D163: WPR profile of `UncachedIsMatch` in a short quiet window agreed with peers, then a design note with options (lazy or size-gated Teddy prefilter, the D11 nodes).
+**Next action:** (1) follow the D99 builder (status file); review its return, then a review pass of the diff before merging; (2) D163: WPR profile of `UncachedIsMatch` in a short quiet window agreed with peers, then a design note with options (lazy or size-gated Teddy prefilter, the D11 nodes).
