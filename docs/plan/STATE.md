@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 05:37 by Claude Code (overnight: D99 fix-delta review clean of wrong answers; builder closing its test gaps).
+**Updated:** 2026-11-18 05:56 by Claude Code (overnight: D99 built, two blind reviews done, every gate green; waiting only on the RAM gate to commit, then merge).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,12 +36,13 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb); free RAM 8.3-9.8 GB < the 12 GB commit gate.
-  Backup `.scratch/d99b/wip-fix-0501.patch` + `wip-untracked/`. Witness 76,446 to 4,367 steps; deep-recursion cost
-  fixed (verified n=500/1000: on within 3-10% time, 2% bytes, `.scratch/d99v/deep2.cs`); ratchet GREEN 10,395; audits
-  0 counterexamples, 0 diffs vs main in 315,134 runs. Fix-delta review `.scratch/d99r2/review.md`: no wrong answer; builder closing its gaps (O(1) cost test, self-delimiting keys, witnesses), patches `wip-fix2-*`.
+- D99 BUILT AND GATED, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.3-9.8 GB all night, under
+  the 12 GB commit gate. Backup `.scratch/d99b/wip-fix2-0548.patch` + `wip-untracked/`. Witness 76,446 to 4,367
+  steps; deep recursion within 3-10% of memo-off (`.scratch/d99v/deep2.cs`); ratchet GREEN 10,397; oracle 3 seeds:
+  only D164/D165 (no group call); 0 diffs vs main. Blind reviews `.scratch/d99r/`, `.scratch/d99r2/`: no wrong answer.
+  Open: why a pending call's section frame can be off the chain (FrameIndex -2; memo just switches off there).
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge D164 and D165 (new oracle rows, identical on main); (3) D163 (bisected; worktree `.claude/worktrees/d163`, sampler `.scratch/d163/types.cs`): WPR profile in a quiet window, design note with options.
+**Next action:** (1) D99: when free RAM >= 12 GB, commit on `perf/d99-continuation-memo` under the commit lock, merge to main, ratchet + oracle on main, D99 row to F; (2) judge D164, D165; (3) D163: WPR profile of `UncachedIsMatch` (worktree `.claude/worktrees/d163`), design note with options.
