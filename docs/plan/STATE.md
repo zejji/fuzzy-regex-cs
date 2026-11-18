@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 07:27 by Claude Code (morning stop: D164/D165 merged; D163 profiled, options note; D99 gated, uncommitted (free RAM 9.4 GB < 12 GB gate)).
+**Updated:** 2026-11-18 07:45 by Claude Code (D99 committed 8498b782 (owner: commit under the RAM gate) and merged to main 8887e325; post-merge gates running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,10 +36,11 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D99 BUILT AND GATED, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.3-9.8 GB all night, under
-  the 12 GB commit gate. Backup `.scratch/d99b/wip-fix2-0548.patch` + `wip-untracked/`. Witness 76,446 to 4,367
-  steps; deep recursion within 3-10% of memo-off (`.scratch/d99v/deep2.cs`); ratchet GREEN 10,397; oracle 3 seeds:
-  only D164/D165; 0 diffs vs main; blind reviews `.scratch/d99r*/`: no wrong answer. Open: why a pending call's section frame can be off the chain (FrameIndex -2; the memo switches off there).
+- D99 merged to main 8887e325 (branch commit 8498b782). Post-merge gates running: `.scratch/main-gate/gates.sh`
+  (ratchet then oracle 3 seeds), logs `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` (each ends with an
+  EXIT line). If a log has no EXIT line and no gates.sh process runs, re-run gates.sh. Expected: ratchet GREEN
+  10,397; oracle diverging only on D164/D165 (judged rows, now EXPECTED). Then: D99 row to F155, worktree d99b
+  removed, push needs the owner. Open: FrameIndex -2 mechanism (memo switches off there), see the design note.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
@@ -47,4 +48,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when free RAM >= 12 GB: commit D99 (`perf/d99-continuation-memo`) under the commit lock, merge, ratchet + oracle on main, D99 row to F; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: design note `2026-11-18-d163-compile-cost-options.md`: measure the two build costs and per-character savings in a quiet window, then size-gated lazy build or option 3.
+**Next action:** (1) check the D99 post-merge gates (In flight); if green, move D99 to F155 in KNOWN-DEFECTS, remove `.claude/worktrees/d99b`, ask the owner to push; if red, stop and diagnose; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: measure the two build costs in a quiet window (design note), then build or option 3.
