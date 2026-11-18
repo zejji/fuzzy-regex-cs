@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 05:03 by Claude Code (overnight: D99 fix verified; blind review of the fix delta running).
+**Updated:** 2026-11-18 05:37 by Claude Code (overnight: D99 fix-delta review clean of wrong answers; builder closing its test gaps).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,7 +39,7 @@ measurement, WPR profiles and benchmarks.
 - D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb); free RAM 8.3-9.8 GB < the 12 GB commit gate.
   Backup `.scratch/d99b/wip-fix-0501.patch` + `wip-untracked/`. Witness 76,446 to 4,367 steps; deep-recursion cost
   fixed (verified n=500/1000: on within 3-10% time, 2% bytes, `.scratch/d99v/deep2.cs`); ratchet GREEN 10,395; audits
-  0 counterexamples, 0 diffs vs main in 315,134 runs. Blind review of the fix delta (Opus) -> `.scratch/d99r2/review.md`.
+  0 counterexamples, 0 diffs vs main in 315,134 runs. Fix-delta review `.scratch/d99r2/review.md`: no wrong answer; builder closing its gaps (O(1) cost test, self-delimiting keys, witnesses), patches `wip-fix2-*`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
