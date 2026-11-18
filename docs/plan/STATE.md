@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 03:23 by Claude Code (overnight: D99 builder at gates; suite and ratchet green, oracle seed 20261118 being checked against main).
+**Updated:** 2026-11-18 03:28 by Claude Code (overnight: D99 built and gated, uncommitted (RAM gate); blind review of the build running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -37,14 +37,14 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - D163 bisected (row): worktree `.claude/worktrees/d163` kept for the profile; sampler `.scratch/d163/types.cs`.
-- D99 builder (Opus subagent) on `perf/d99-continuation-memo`, worktree `.claude/worktrees/d99b`, brief
-  `.claude/driver/brief-d99-continuation-memo-2026-11-18.md` (local), status `.scratch/d99b/status.txt`.
-  Audit mode first; stops on any unexplained counterexample. If the session ends, check the worktree's
-  WIP commits and status, then relaunch from the brief.
+- D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.9-9.8 GB < the 12 GB commit
+  gate. Backup `.scratch/d99b/wip-0326.patch` + `wip-untracked/`. Witness 76,446 to 3,497 steps; ratchet GREEN
+  10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (to judge); main differential 0 diffs.
+  Commit when RAM >= 12 GB. Blind review of the build (Opus) writing `.scratch/d99r/review.md`.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) follow the D99 builder (status file); review its return, then a review pass of the diff before merging; (2) D163: WPR profile of `UncachedIsMatch` in a short quiet window agreed with peers, then a design note with options (lazy or size-gated Teddy prefilter, the D11 nodes).
+**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge oracle seed 20261118 rows 2850 `(?r)(?w)\X*` and 3889 (`(?b)(?r)\M` partial), new on main; (3) D163: WPR profile in a quiet window, design note with options.
