@@ -161,7 +161,7 @@ of the fuzzy `(?&g)*` shapes. Keying that state exactly instead (the repeat's `C
 `ChangesAtStart` and the D17 empty-iteration state) is the next design question; first measure how
 many of column A's switch-offs come from repeats that are actually open at the call.
 
-## Keying the repeat-start state instead of switching off (read, not yet measured)
+## Keying the repeat-start state instead of switching off
 
 A second subagent read the code for the question above (`.scratch/d99/repeat-start-design.md`, 129
 lines; no probe ran, the D82 benchmark had the machine). Its findings, unverified until measured:
@@ -180,8 +180,27 @@ lines; no probe ran, the D82 benchmark had the machine). Its findings, unverifie
   a group (`TestedGroups.Length > 0`), which costs the witness and the targeted rows nothing; or key
   the number of D17 entries each open run holds. No witness built yet.
 
-Next, after the benchmark: measure column A' (open repeats only) and K (relative values keyed, memo
-off when `TestedGroups.Length > 0`) on the three corpora, then a blind review of the proof.
+Measured 2026-11-18 02:00 (`.scratch/d99/probe-k.diff`, logs `battery7.log`, `calls7.log`; one run
+each). A' switches off only for repeats open at the call (a compile-time lexical test, not checked at
+run time); K keys the relative values instead of switching off, with the memo off when the pattern tests
+a group; K0 is K without that rule:
+
+| Corpus | Entries | Strict + reach | A (any repeat) | A' (open only) | A' + guard ancestors | K | K0 |
+|---|---|---|---|---|---|---|---|
+| The D99 witness | 3,806 | 98.3% | 98.3% | 98.3% | 96.3% | 96.3% | 96.3% |
+| Battery call rows | 104,922 | 85.5% | 70.3% | 85.2% | 85.2% | 85.1% | 85.4% |
+| D93's targeted rows | 1,958,390 | 83.2% | 5.7% | 15.6% | 14.4% | 63.5% | 65.0% |
+
+- Most of the battery's loss under A came from stale repeats; on the targeted rows 70.6% of entries
+  have a genuinely open repeat starting at the call, which only keying recovers.
+- The D17 rule (off when the pattern tests a group) costs 0.3 points on the battery and 1.5 on the
+  targeted rows.
+- K is a lower bound: the probe switches off any level it cannot resolve and keys every optional-pass
+  slot at p, open or stale.
+
+**Recommendation: build K**, with the memo off when the pattern tests a group, the key of obligation 1
+plus the relative repeat-start values, and the audit mode of obligation 3 as the first step. A blind
+review of the proof comes before the build is merged.
 
 ## The four proof obligations (draft 2026-11-17, not yet reviewed)
 
