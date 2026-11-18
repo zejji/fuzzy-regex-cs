@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 02:53 by Claude Code (overnight: D99 builder in audit round 2; WIP as patches in .scratch/d99b, RAM gate shut).
+**Updated:** 2026-11-18 03:23 by Claude Code (overnight: D99 builder at gates; suite and ratchet green, oracle seed 20261118 being checked against main).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
