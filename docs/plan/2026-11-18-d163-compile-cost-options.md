@@ -42,8 +42,17 @@ sees this; one who builds a pattern per call, which the static API does on a cac
 
 ## Recommendation
 
-Option 1 for both fields, measured before merging: the five compile-per-call rows, the search rows that
-use the leading-string screen (they must not get slower beyond noise), an allocation check, and a WPR
-profile after. Option 2 only if option 1 leaves the Teddy build on a hot compile path. The D11 node growth
-is separate: look at which nodes D11 adds to a pattern without partial matching, and whether they can be
-built only when a partial match is asked for.
+Laziness alone does not help the rows that regressed: each of them searches at once, its subject does not
+match at position 0, so the search uses both the leading-string screen and the ASCII tables, and the first
+search would pay what the compile paid. What would help is option 1 with a size gate: build each structure
+lazily, and only when a search's subject is long enough for it to repay its build; a shorter subject takes
+the plain path that already exists (the screen is an optimisation over trying each position; the tables
+are an optimisation over `Matcher.MatchesSet`). The threshold comes from measurement: the build cost of
+each structure against what it saves per character, on this pattern and on the search rows that rely on
+the screen. Those search rows must not get slower beyond noise, and a cached pattern pays the build once
+either way.
+
+Before building: measure the two build costs alone (Release, pinned, a quiet window) and the per-character
+saving of each, to see whether a threshold exists that recovers most of the 15% without touching the
+search rows. If none does, option 3. The D11 node growth is separate: look at which nodes D11 adds to a
+pattern without partial matching, and whether they can be built only when a partial match is asked for.
