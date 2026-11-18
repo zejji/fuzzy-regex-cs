@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 06:20 by Claude Code (overnight end: D164/D165 merged; D163 profiled; D99 gated, waiting on the RAM gate to commit).
+**Updated:** 2026-11-18 06:22 by Claude Code (overnight end: D164/D165 merged; D163 profiled, options note; D99 gated, waiting on the RAM gate to commit).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -47,4 +47,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when free RAM >= 12 GB: commit D99 (`perf/d99-continuation-memo`) under the commit lock, merge, ratchet + oracle on main, D99 row to F; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: profiled (row); design note with options (lazy leading strings and ASCII answers), then build.
+**Next action:** (1) when free RAM >= 12 GB: commit D99 (`perf/d99-continuation-memo`) under the commit lock, merge, ratchet + oracle on main, D99 row to F; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: design note `2026-11-18-d163-compile-cost-options.md`: measure the two build costs and per-character savings in a quiet window, then size-gated lazy build or option 3.
