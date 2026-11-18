@@ -39,7 +39,7 @@ measurement, WPR profiles and benchmarks.
 - D163 bisected (row): worktree `.claude/worktrees/d163` kept for the profile; sampler `.scratch/d163/types.cs`.
 - D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.9-9.8 GB < the 12 GB commit
   gate. Backup `.scratch/d99b/wip-0326.patch` + `wip-untracked/`. Witness 76,446 to 3,497 steps; ratchet GREEN
-  10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (to judge); main differential 0 diffs.
+  10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (D164, D165); main differential 0 diffs.
   Commit when RAM >= 12 GB. Blind review of the build (Opus) writing `.scratch/d99r/review.md`.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
@@ -47,4 +47,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge oracle seed 20261118 rows 2850 `(?r)(?w)\X*` and 3889 (`(?b)(?r)\M` partial), new on main; (3) D163: WPR profile in a quiet window, design note with options.
+**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge D164 and D165 (new oracle rows, identical on main); (3) D163: WPR profile in a quiet window, design note with options.
