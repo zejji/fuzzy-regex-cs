@@ -41,6 +41,7 @@ measurement, WPR profiles and benchmarks.
   steps; deep recursion within 3-10% of memo-off (`.scratch/d99v/deep2.cs`); ratchet GREEN 10,397; oracle 3 seeds:
   only D164/D165 (no group call); 0 diffs vs main. Blind reviews `.scratch/d99r/`, `.scratch/d99r2/`: no wrong answer.
   Open: why a pending call's section frame can be off the chain (FrameIndex -2; memo just switches off there).
+- Judge (Opus) for D164/D165 in `.claude/worktrees/judge-c` (`test/judge-c-oracle-rows`), patches `.scratch/judge-c/`, deadline 07:25.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
