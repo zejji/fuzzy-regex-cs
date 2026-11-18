@@ -202,6 +202,43 @@ a group; K0 is K without that rule:
 plus the relative repeat-start values, and the audit mode of obligation 3 as the first step. A blind
 review of the proof comes before the build is merged.
 
+## Blind review of the design (2026-11-18)
+
+An Opus reviewer was given the mechanism and the key but not this note's argument
+(`.scratch/d99/blind-review.md`). Its findings, with what the build must do about each. The two
+witnesses' expected answers were re-checked in Python regex 2026.9.29 (pinned venv): (0, 3) with fuzzy
+counts (1, 0, 0), and (0, 2).
+
+1. **High, witnessed: clamped section rooms.** `FailedCallKey` clamps each outer section's room, and
+   the pass rooms, to the open section's own room (Matcher.cs ~6005-6058). Exact inside the call, not
+   after it returns: once the inner section closes, later errors are charged against the outer
+   section's real count. `(?:.*\d)?(?:(?:q|a)(?:(?1)){e<=0}c|(b(?1)?)){s<=1}` over `abd`: the calls at
+   position 1 after a substituted `q` and after an exact `a` build identical keys; skipping the second
+   loses the match (0, 3). The chain alone does not cover it (no pending frame). **Build:** the
+   continuation part keys every open section frame's node and exact counts (entry counts on the saved
+   stack plus the live ones), unclamped, including those outside the outermost call.
+2. **Blocking, witnessed: the call site.** The key names the called group, not the site.
+   `(?:..z|)(?:(?1)x|(?1)y|(a(?1)?)){s<=0}` over `ay`: both calls at 0 build the same key; skipping the
+   second site gives (0, 1) for (0, 2). **Build:** E's own return node is the first link of the chain
+   (the draft's summary had it; it must not be lost).
+3. **Medium, mechanism only: ancestors in other sections.** After a return a later call can be made in
+   an ancestor's own section, or a new one; the guard then compares the ancestor's exact counts
+   (`TryOpenCall`). The key holds only a same-section flag, and the D93 filter drops ancestors outright.
+   **Build:** drop that filter too, and key each ancestor's section and counts.
+4. **Low-medium, mechanism only: the reach across attempts.** The memo lives for a pass, the reach for an
+   attempt; skipping a continuation leaves `ReachedHigh` lower than main would, so a later call in that
+   attempt can be refused by the re-entry guard where main lets it through. **Build:** empty the new
+   memo at every attempt start. The existing failed-call memo has the same exposure: a witness search
+   for it goes in the audit mode, and it is not a defect until one is found.
+5. **Medium, mechanism only: repeats outside the frames.** A repeat around an outer call site whose body
+   the called group cannot write is not in the call frame (D68), yet its live Start, `CaptureChange` and
+   `ChangesAtStart` are read by `EmptyIterationAdmitted` after the returns. **Build:** collect the open
+   repeats from the call sites of every level, reading live values for those not in a frame.
+
+Checked sound by the reviewer: the record point (SUCCESS means no match was possible), capture lists,
+discarding constructs, repeat guards (off for fuzzy), the other memos, timeouts and partial passes.
+
+
 ## The four proof obligations (draft 2026-11-17, not yet reviewed)
 
 Written by an Opus subagent from the code alone; every claim is a hypothesis until the audit mode
