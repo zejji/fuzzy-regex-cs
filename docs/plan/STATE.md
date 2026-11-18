@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 22:00 by Claude Code (CI RED on pushed main 5f1fff61; fix waiting for peers to finish).
+**Updated:** 2026-11-18 22:45 by Claude Code (CI fix merged to main 840d6caa, not pushed; judge-row waits for squiggle's turn).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,10 +36,8 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- CI RED on main 5f1fff61 (run 44289288199, owner pushed): `CallContinuationMemoTests.Each_open_call_is_interned_once_however_deep_the_recursion`
-  reads WorkCounter without `EngineWork.SkipUnlessCounting()`, so Release (CI) sees 0 keys. Fix (one line) uncommitted in
-  `.claude/worktrees/ci-release-skip` (branch `fix/ci-release-counter-skip`): proven (Release skips, Debug 9/9); ratchet suite 10,397/10,397 but RED only
-  for the missing submodule (now checked out); re-run ratchet, commit with STATUS stamp, merge; push needs owner.
+- CI RED on main 5f1fff61 (run 44289288199): fixed on main 840d6caa (Release skip for the continuation interning test; ratchet
+  GREEN 10,397). Not pushed: push needs the owner, then check CI.
 - Overnight (owner 2026-11-18 21:45): wait for peers future-ide-69 and squiggle-mockups-2f to report done (asked, idle notices armed;
   recheck at 01:00 if silent), then work autonomously until 07:40. future-ide-69 done 22:05; squiggle-mockups-2f resumed work 22:20
   at the owner's request: take turns, ask it before any heavy build.
@@ -53,4 +51,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (0) CI fix above; (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) D163: measure the two build costs in a quiet window (design note), then build or option 3.
+**Next action:** (0) owner: push main (CI fix 840d6caa); (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) D163: measure the two build costs in a quiet window (design note), then build or option 3.
