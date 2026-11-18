@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 07:45 by Claude Code (D99 committed 8498b782 (owner: commit under the RAM gate) and merged to main 8887e325; post-merge gates running).
+**Updated:** 2026-11-18 09:30 by Claude Code (D99 post-merge gates re-run from scratch).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -37,7 +37,7 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - D99 merged to main 8887e325 (branch commit 8498b782). Post-merge gates running: `.scratch/main-gate/gates.sh`
-  (ratchet then oracle 3 seeds) WERE STOPPED 07:47 (owner left): re-run gates.sh from scratch; logs
+  (ratchet then oracle 3 seeds) re-launched 09:30, bash PID 30456 (watchdog 39256, jbguard 29216); logs
   `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` end with an EXIT line. Expected: ratchet GREEN
   10,397; oracle diverging only on D164/D165 (judged rows, now EXPECTED). Then: D99 row to F155, worktree d99b
   removed, push needs the owner. Open: FrameIndex -2 mechanism (memo switches off there), see the design note.
