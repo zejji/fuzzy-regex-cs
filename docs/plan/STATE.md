@@ -38,9 +38,11 @@ measurement, WPR profiles and benchmarks.
 
 - CI RED on main 5f1fff61 (run 44289288199, owner pushed): `CallContinuationMemoTests.Each_open_call_is_interned_once_however_deep_the_recursion`
   reads WorkCounter without `EngineWork.SkipUnlessCounting()`, so Release (CI) sees 0 keys. Fix (one line) uncommitted in
-  `.claude/worktrees/ci-release-skip` (branch `fix/ci-release-counter-skip`): prove Release skip + Debug pass, commit, merge, push needs owner.
+  `.claude/worktrees/ci-release-skip` (branch `fix/ci-release-counter-skip`): proven (Release skips, Debug 9/9); ratchet suite 10,397/10,397 but RED only
+  for the missing submodule (now checked out); re-run ratchet, commit with STATUS stamp, merge; push needs owner.
 - Overnight (owner 2026-11-18 21:45): wait for peers future-ide-69 and squiggle-mockups-2f to report done (asked, idle notices armed;
-  recheck at 01:00 if silent), then work autonomously until 07:40.
+  recheck at 01:00 if silent), then work autonomously until 07:40. future-ide-69 done 22:05; squiggle-mockups-2f resumed work 22:20
+  at the owner's request: take turns, ask it before any heavy build.
 - judge-row D160 fix started 09:45 in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted): DIVERGE
   blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
   C# test `A_divergence_block_also_gives_the_port_answer_in_upstreams_change_positions` not yet built (waits for RAM).
