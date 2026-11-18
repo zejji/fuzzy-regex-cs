@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 10:40 by Claude Code (D99 post-merge gates GREEN, D99 is F155; judge-row D160 fix in progress).
+**Updated:** 2026-11-18 22:00 by Claude Code (CI RED on pushed main 5f1fff61; fix waiting for peers to finish).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,7 +36,11 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Not pushed: D99 merge 8887e325 and STATE/KNOWN-DEFECTS commits since. Push needs the owner (ratchet GREEN 10,397 on 8887e325).
+- CI RED on main 5f1fff61 (run 44289288199, owner pushed): `CallContinuationMemoTests.Each_open_call_is_interned_once_however_deep_the_recursion`
+  reads WorkCounter without `EngineWork.SkipUnlessCounting()`, so Release (CI) sees 0 keys. Fix (one line) uncommitted in
+  `.claude/worktrees/ci-release-skip` (branch `fix/ci-release-counter-skip`): prove Release skip + Debug pass, commit, merge, push needs owner.
+- Overnight (owner 2026-11-18 21:45): wait for peers future-ide-69 and squiggle-mockups-2f to report done (asked, idle notices armed;
+  recheck at 01:00 if silent), then work autonomously until 07:40.
 - judge-row D160 fix started 09:45 in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted): DIVERGE
   blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
   C# test `A_divergence_block_also_gives_the_port_answer_in_upstreams_change_positions` not yet built (waits for RAM).
@@ -47,4 +51,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) D163: measure the two build costs in a quiet window (design note), then build or option 3.
+**Next action:** (0) CI fix above; (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) D163: measure the two build costs in a quiet window (design note), then build or option 3.
