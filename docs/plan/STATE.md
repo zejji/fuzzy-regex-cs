@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 06:22 by Claude Code (overnight end: D164/D165 merged; D163 profiled, options note; D99 gated, waiting on the RAM gate to commit).
+**Updated:** 2026-11-18 07:27 by Claude Code (morning stop: D164/D165 merged; D163 profiled, options note; D99 gated, uncommitted (free RAM 9.4 GB < 12 GB gate)).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
