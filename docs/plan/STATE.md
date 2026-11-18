@@ -37,8 +37,8 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - D99 merged to main 8887e325 (branch commit 8498b782). Post-merge gates running: `.scratch/main-gate/gates.sh`
-  (ratchet then oracle 3 seeds), logs `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` (each ends with an
-  EXIT line). If a log has no EXIT line and no gates.sh process runs, re-run gates.sh. Expected: ratchet GREEN
+  (ratchet then oracle 3 seeds) WERE STOPPED 07:47 (owner left): re-run gates.sh from scratch; logs
+  `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` end with an EXIT line. Expected: ratchet GREEN
   10,397; oracle diverging only on D164/D165 (judged rows, now EXPECTED). Then: D99 row to F155, worktree d99b
   removed, push needs the owner. Open: FrameIndex -2 mechanism (memo switches off there), see the design note.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
