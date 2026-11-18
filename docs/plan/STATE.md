@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 01:57 by Claude Code (overnight: D82 run done and closed; D163 opened).
+**Updated:** 2026-11-18 02:05 by Claude Code (overnight: D99 K measured, blind review running; D163 sweep running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,11 +36,14 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- Nothing running. D82 run done 01:54 (power settings restored, temp override deleted, peers told "BDN done").
+- D163 allocation sweep: `.scratch/d163/sweep.sh` (nohup bash) over the 27 src commits da44aa34..84d6373c in
+  worktree `.claude/worktrees/d163`, log `.scratch/d163/sweep.log` (ends with DONE). Samples: compile bytes
+  30,024 (2373e273) to 33,440 (main), steps 10-03..10-09 (+1,310) and 10-09..10-14 (+1,560): `sample.log`.
+- D99 blind design review (Opus subagent) writing `.scratch/d99/blind-review.md`; read it before building.
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D99: measure A' and K (design note "Keying the repeat-start state"), probe in `.claude/worktrees/d99m`; then a blind review of the proof, build test-first; (2) D163: WPR profile of `UncachedIsMatch` on main vs 2373e273, then bisect the compile-time growth.
+**Next action:** (1) D163: name the commits behind the two steps from `sweep.log`, then a WPR profile of `UncachedIsMatch` (time rose 15%, bytes 11%); (2) D99: act on the blind review, then build K test-first in its own worktree, audit mode first (design note "Keying the repeat-start state").
