@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 01:45 by Claude Code (overnight: D82 BDN passes 1-3 done, pass 4 of 4 running).
+**Updated:** 2026-11-18 02:10 by Claude Code (overnight: D82 run done and closed; D163 opened).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,7 +19,7 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82: full BDN vs baseline when LibreHardwareMonitor runs; then pick the next fix: recommended D116 (design note with options first) |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); new D163 (compile-per-call rows 1.09-1.18x slower, +9-13% bytes): profile and bisect; D99 design in progress; then pick the next fix: recommended D116 (design note with options first) |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -36,15 +36,11 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- **D82 BDN running** since 22:01: wrapper pwsh PID 48484 (`.scratch/d82/run-d82.ps1`), log `.scratch/d82/run.log`,
-  results `.scratch/d82/bdn/{base,main,mainb,baseb}`, A-B-B-A d82base 2373e273 vs bdn-d82main b41fd1ca, ends ~03:00.
-  The wrapper restores CPU cap 0 and AC standby 30 min. After it: delete `.scratch/s1024/cputemp-limit-override.txt`
-  (set to 100 tonight: idle reads 98-100 C, so the 86 C wait only cost 30 min a pass); send "BDN done" to
-  squiggle-mockups, future-ide, general-questions. No builds or probes until then.
+- Nothing running. D82 run done 01:54 (power settings restored, temp override deleted, peers told "BDN done").
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
 - Owner, at the end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) when D82 ends, compare per the 2026-11-05 note's rule, write a dated note under `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/` and the D82 row; (2) D99: measure A' and K (design note "Keying the repeat-start state"), probe in `.claude/worktrees/d99m`; then blind review of the proof, build test-first.
+**Next action:** (1) D99: measure A' and K (design note "Keying the repeat-start state"), probe in `.claude/worktrees/d99m`; then a blind review of the proof, build test-first; (2) D163: WPR profile of `UncachedIsMatch` on main vs 2373e273, then bisect the compile-time growth.
