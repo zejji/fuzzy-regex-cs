@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-17 23:45 by Claude Code (overnight: D82 BDN pass 1 done 22:53, pass 2 of 4 at 71 benchmarks).
+**Updated:** 2026-11-18 00:45 by Claude Code (overnight: D82 BDN passes 1-2 done, pass 3 of 4 running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
