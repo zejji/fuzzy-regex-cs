@@ -517,6 +517,12 @@ public sealed class MatchStateCacheTests
             case null when field.FieldType == typeof(Dictionary<(long Key, int Reach), int>):
                 field.SetValue(state, new Dictionary<(long Key, int Reach), int> { [(7, 7)] = 7 });
                 break;
+            case null when field.FieldType == typeof(CallContinuations):
+                var continuations = new CallContinuations();
+                _ = continuations.Failed.Add([7]);
+                continuations.Entries.Add((7, 0, -1, false));
+                field.SetValue(state, continuations);
+                break;
             case null when field.FieldType == typeof(List<CallSection>):
                 field.SetValue(state, new List<CallSection> { new(7, 7, 7, 7) });
                 break;
@@ -620,6 +626,23 @@ public sealed class MatchStateCacheTests
             case ICollection { Count: 0 } and not Array:
             case HashSet<(long Key, int Reach)> { Count: 0 }:
             case CaptureTextIds { Count: 0 }:
+            // D99: the continuation memo's state once cleared; its scratch is overwritten before it
+            // is read.
+            case CallContinuations
+            {
+                Failed.Count: 0,
+                Snapshots.Count: 0,
+                Levels.Count: 0,
+                Links.Count: 0,
+                Tails.Count: 0,
+                Entries.Count: 0,
+                EntryKeys.Count: 0,
+                PendingKey: false,
+                KeysThisPass: 0,
+                LateLevels: 0,
+                HitsThisPass: 0,
+                Flagged: 0
+            }:
             // Item 10: so is a ranked call's storage once its lists are empty. Its saved groups and
             // spare change lists are not compared: every ranked call overwrites them before it
             // reads them, which FuzzyBestMatchTests.A_warm_ranked_call_answers_as_a_fresh_pattern_does
@@ -685,6 +708,23 @@ public sealed class MatchStateCacheTests
                 // overwrites all of ContinuationKey, so only their lengths can carry over.
                 lines.Add($"{path}.Key.Length={records.Key.Length}");
                 lines.Add($"{path}.ContinuationKey.Length={records.ContinuationKey.Length}");
+                break;
+            case CallContinuations continuations:
+                lines.Add(
+                    $"{path}=({continuations.Failed.Count},{continuations.Flagged},{continuations.PendingKey},{continuations.KeysThisPass},{continuations.HitsThisPass})"
+                );
+                RenderItems($"{path}.Snapshots", continuations.Snapshots, lines);
+                RenderItems($"{path}.Levels", continuations.Levels, lines);
+                lines.Add(
+                    $"{path}.Links={continuations.Links.Count},{continuations.Tails.Count},{continuations.LateLevels}"
+                );
+                RenderItems(
+                    $"{path}.Entries",
+                    continuations.Entries.Select(static entry =>
+                        (entry.BstackAt, entry.KeyAt, entry.KeyLength, entry.Flagged)
+                    ),
+                    lines
+                );
                 break;
             case ByteStack stack:
                 RenderItems(path, ((byte[])Private(stack, "_storage")).Take(stack.Count), lines);
