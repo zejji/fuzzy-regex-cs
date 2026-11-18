@@ -36,7 +36,6 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D163 bisected (row): worktree `.claude/worktrees/d163` kept for the profile; sampler `.scratch/d163/types.cs`.
 - D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.9-9.8 GB < the 12 GB commit
   gate. Backup `.scratch/d99b/wip-0326.patch` + `wip-untracked/`. Witness 76,446 to 3,497 steps; ratchet GREEN
   10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (D164, D165); main differential 0 diffs.
@@ -44,9 +43,8 @@ measurement, WPR profiles and benchmarks.
   blocker, reproduced: deep recursion goes cubic with the memo on even with no hits (n=500: 49 ms / 19 MB off,
   590-721 ms / 872 MB on). Builder resumed to intern the key chain (patches `wip-fix-*.patch`).
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
-- Deferred defects: D134, D136, D137, D142. D161/D162 (oracle rows). Parked: transpositions (post-1.3).
-- Owner, at the end of phase 11: delete the WPR scheduled tasks.
+- Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge D164 and D165 (new oracle rows, identical on main); (3) D163: WPR profile in a quiet window, design note with options.
+**Next action:** (1) D99: commit on its branch when the RAM gate opens; act on the build review; then merge to main (ratchet, oracle) and the D99 row; (2) judge D164 and D165 (new oracle rows, identical on main); (3) D163 (bisected; worktree `.claude/worktrees/d163`, sampler `.scratch/d163/types.cs`): WPR profile in a quiet window, design note with options.
