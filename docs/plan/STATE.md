@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 04:00 by Claude Code (overnight: D99 build review found a cubic key cost; builder fixing).
+**Updated:** 2026-11-18 04:45 by Claude Code (overnight: D99 key cost fixed (deep rows within 5%), builder re-running gates; RAM gate still shut).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -41,7 +41,7 @@ measurement, WPR profiles and benchmarks.
   10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (D164, D165); main differential 0 diffs.
   Commit when RAM >= 12 GB. Build review `.scratch/d99r/review.md`: no correctness defect found, but a merge
   blocker, reproduced: deep recursion goes cubic with the memo on even with no hits (n=500: 49 ms / 19 MB off,
-  590-721 ms / 872 MB on). Builder resumed to intern the key chain (patches `wip-fix-*.patch`).
+  590-721 ms / 872 MB on). Builder fixed it (interned chain, flat keys; deep rows within 5%) and is re-running the gates (patches `wip-fix-*.patch`).
 - Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
