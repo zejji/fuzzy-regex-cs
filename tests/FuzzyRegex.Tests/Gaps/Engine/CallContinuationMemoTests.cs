@@ -131,6 +131,7 @@ public sealed class CallContinuationMemoTests
     [Arguments(400)]
     public void Each_open_call_is_interned_once_however_deep_the_recursion(int depth)
     {
+        EngineWork.SkipUnlessCounting();
         // Blind review of the fix round, finding 1 (2026-11-18): the steps and bytes above cannot
         // see a key that walks every pending level again, since interning allocates nothing once a
         // tail has been seen; with the cache in LinkOf dropped the same row is cubic in Release
