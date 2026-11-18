@@ -39,8 +39,7 @@ measurement, WPR profiles and benchmarks.
 - D99 BUILT AND GATED, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.3-9.8 GB all night, under
   the 12 GB commit gate. Backup `.scratch/d99b/wip-fix2-0548.patch` + `wip-untracked/`. Witness 76,446 to 4,367
   steps; deep recursion within 3-10% of memo-off (`.scratch/d99v/deep2.cs`); ratchet GREEN 10,397; oracle 3 seeds:
-  only D164/D165 (no group call); 0 diffs vs main. Blind reviews `.scratch/d99r/`, `.scratch/d99r2/`: no wrong answer.
-  Open: why a pending call's section frame can be off the chain (FrameIndex -2; memo just switches off there).
+  only D164/D165; 0 diffs vs main; blind reviews `.scratch/d99r*/`: no wrong answer. Open: why a pending call's section frame can be off the chain (FrameIndex -2; the memo switches off there).
 - D164/D165 judged (a) port right (F153: ledger 43 + 95; F154: D11 + ledger 11), Python witnesses re-checked; patch
   `.scratch/judge-c/wip-0611.patch` for `.claude/worktrees/judge-c` (uncommitted, RAM gate). Tooling gap: `tools/judge-row.py`
   records reversed fuzzy change positions in port terms, `JudgedDivergenceTests` wants upstream terms (D160); fix the tool.
