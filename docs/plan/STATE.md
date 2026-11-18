@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 04:45 by Claude Code (overnight: D99 key cost fixed (deep rows within 5%), builder re-running gates; RAM gate still shut).
+**Updated:** 2026-11-18 05:03 by Claude Code (overnight: D99 fix verified; blind review of the fix delta running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -36,13 +36,10 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb): free RAM 8.9-9.8 GB < the 12 GB commit
-  gate. Backup `.scratch/d99b/wip-0326.patch` + `wip-untracked/`. Witness 76,446 to 3,497 steps; ratchet GREEN
-  10,393; oracle 7/4242 clean, 20261118 two call-free rows identical on main (D164, D165); main differential 0 diffs.
-  Commit when RAM >= 12 GB. Build review `.scratch/d99r/review.md`: no correctness defect found, but a merge
-  blocker, reproduced: deep recursion goes cubic with the memo on even with no hits (n=500: 49 ms / 19 MB off,
-  590-721 ms / 872 MB on). Builder fixed it (interned chain, flat keys; deep rows within 5%) and is re-running the gates (patches `wip-fix-*.patch`).
-- Overnight mandate (owner 2026-11-17 evening): work autonomously; LibreHardwareMonitor is running (localhost:8085), so D82's full BDN is unblocked, but other Claude sessions are active: ListAgents, message them, and agree a quiet window (likely later) before any timing. Keep a monitor armed every turn.
+- D99 BUILT, UNCOMMITTED in `.claude/worktrees/d99b` (head 56fcabfb); free RAM 8.3-9.8 GB < the 12 GB commit gate.
+  Backup `.scratch/d99b/wip-fix-0501.patch` + `wip-untracked/`. Witness 76,446 to 4,367 steps; deep-recursion cost
+  fixed (verified n=500/1000: on within 3-10% time, 2% bytes, `.scratch/d99v/deep2.cs`); ratchet GREEN 10,395; audits
+  0 counterexamples, 0 diffs vs main in 315,134 runs. Blind review of the fix delta (Opus) -> `.scratch/d99r2/review.md`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
