@@ -239,6 +239,220 @@ Checked sound by the reviewer: the record point (SUCCESS means no match was poss
 discarding constructs, repeat guards (off for fuzzy), the other memos, timeouts and partial passes.
 
 
+## Build (2026-11-18, branch `perf/d99-continuation-memo`)
+
+The memo is `src/FuzzyRegex/Engine/CallContinuationMemo.cs`; its remarks list every key part and
+the reader it serves. Each pending level is described by a snapshot taken when its call was made
+(what the return gives back), of the repeats and optional passes whose body holds that level's call
+site only (a compile-time table per return node), so a call pays for the repeats around it and not
+for every repeat in the pattern (D68's lesson). The five blind-review fixes are in, and one more:
+
+6. **A hit clears the open calls' failed-call keys.** Found by the differential, not the audit: a
+   hit skips the call's continuation, which runs through every pending return, so an open call can
+   be backtracked past without returning although it could have. The failed-call memo then
+   recorded it as a call that cannot return and failed a later call with the same entry key and a
+   different continuation. `(?:(?P<g>[ab](?&g)a+|ba)(?&g)){1<=d<=2}` over 'aabbaa' answered group 1
+   (0, 1) for (0, 2).
+
+Audit and differential (scratch: `.scratch/d99b/audit.cs`; Debug; "eager" switches both memos on
+from the first call). A counterexample is a match found inside a call the audit flagged as a hit;
+"diffs" compares span, every group's captures and the fuzzy counts with the memo off and on. Every
+row also compared the failed-call memo on against both memos off (blind review item 4).
+
+| Corpus | Rows run | Rows keyed | Keyed calls | Would-be hits | Counterexamples | Diffs on/off | Failed-call memo diffs |
+|---|---|---|---|---|---|---|---|
+| The D99 witness | 1 | 1 | 3,792 | 3,665 | 0 | 0 | 0 |
+| Battery rows with a call (`d93/battery.jsonl`) | 10,597 | 66 | 1,039 | 91 | 0 | 0 | 0 |
+| The same, eager | 10,597 | 603 | 2,851 | 96 | 0 | 0 | 0 |
+| `d93/calls.jsonl`, first 5,000 | 3,994 | 1,063 | 197,131 | 166,767 | 0 | 0 | 0 |
+| The same, eager | 3,994 | 2,868 | 213,044 | 167,727 | 0 | 0 | 0 |
+| Generated grid (17 shapes x 9 budgets x plain/(?b)/(?e)), eager | 10,206 | 5,943 | 57,171 | 8,453 | 0 | 0 | 0 |
+| Guard grid (zero-width re-entry across returns), eager | 23,040 | 8,594 | 33,301 | 12 | 0 | 0 | 0 |
+| Repeat and pass starts grid (fuzzy minimums), eager | 12,960 | 3,317 | 60,520 | 23,685 | 0 | 0 | 0 |
+| The whole test suite, eager (10,393 tests) | - | - | 66,363 | 1,338 | 0 | - | - |
+
+Against main itself (a worktree build of 56fcabfb, memo on in the branch): 0 differing answers in
+121,598 row runs, every corpus above with and without the eager switch.
+
+Most battery call rows are outside the memo: the battery is built from `(*SKIP)`, tested groups and
+non-fuzzy shapes, where the failed-call memo, and so this one, is off.
+
+Mutations (each part removed in turn, then the eager grids and the call rows run again):
+
+| Part removed | Found | Test |
+|---|---|---|
+| Section frames' exact counts (F1) | witness F1 | `CallContinuationMemoTests.The_key_holds_the_exact_counts_of_the_sections_outside_the_call` |
+| The call's own return node (F2) | witness F2 | `The_key_holds_where_the_call_returns_to` |
+| The pending calls' return nodes | `(?:(?:x\|(?&g))*?(?P<g>a(?&g)?b?)x?){1<=d<=2}`, fullmatch 'abaa': one deletion for two | `The_key_holds_where_each_pending_call_returns_to` |
+| Clearing the open calls' failed-call keys (fix 6) | the row above | `A_hit_keeps_the_open_calls_out_of_the_failed_call_memo` |
+| Pending calls at this position, their section and counts (F3) | nothing | open: kept for the guard (`Matcher.TryOpenCall`, `AnOpenCallSawThisReadState`) |
+| Iteration and pass starts at this position | nothing | open: kept for `FuzzyIterationStands`, `EmptyIterationAdmitted`, `OptionalPassAdmitted` |
+| The live level's repeats; repeat counts | nothing | open: kept for the repeat ends |
+| Insertion just behind | nothing | open: kept for `DeletionRepeatsAnEarlierAlternative` |
+| Emptying the set per attempt (F4) | nothing | open: kept for the guard's reach |
+
+Each witness test fails with its part removed and passes on main. The open parts are each read by
+the code named, so they stay in the key; removing them is a later question, which needs a witness
+search per part first.
+
+Cost (Debug `WorkCounter.Steps` and warm bytes; Release times are indicative: best of 15, pinned to
+the performance cores, no quiet window):
+
+| Row | Steps off / on | Bytes off / on (Release) | Release us off / on |
+|---|---|---|---|
+| D99 witness `{d<=6}` over a12c | 76,446 / 3,497 | 395,000 / 78,512 | 4,354 / 293 |
+| `{d<=2}` over a12c | 1,884 / 629 | 11,392 / 12,520 | 100 / 43 |
+| `(?:(?P<g>[ab](?&g)*c\|[ab])){e<=2}` over 'abababcbab' | 294,043 / 20,340 | 987,640 / 189,936 | 20,164 / 1,881 |
+| D68 rows (depth 30, flat 30, fuzzy) at K = 0, 25, 400 | the same | the same | within 5% either way |
+
+"Off" is the branch with the memo switched off, which runs main's code: every new line is behind
+`MatchState.ContinuationMemoOn`.
+
+Gates: ratchet GREEN (10,393 tests); oracle seeds 7 and 4242 clean; seed 20261118 diverges on two
+rows with no group call, where the memo never switches on, and main gives the same two answers:
+row 2850 `(?r)(?w)\X*` (match) and row 3889 `(?b)(?r)\M(?>(?:🏻[a\d]+?){e<=2})(\p{Lu}*?)` (partial
+search). Both are new oracle rows to judge, not D99's.
+
+### After the build's blind review (2026-11-18, later)
+
+The review (`.scratch/d99r/review.md`) found that each keyed call walked every open call and copied
+a key of length O(depth), so a search that recursed n deep at each start went from n^2 to n^3:
+`(?P<g>a(?&g)?c)(?:x){s<=1}` over 'a' * 500 took 591 ms and 872 MB against 51 ms and 19 MB. The
+test `CallContinuationMemoTests.A_deep_recursion_costs_about_what_it_costs_without_the_memo` pins
+it (Debug, depth 200: 5,077,840 B off against 61,595,856 B on before the fix). Changes:
+
+7. **The continuation is interned.** A pending call made before the position now is keyed by one
+   id (`CallContinuationMemo.LinkOf`): its parent's id, the called group, the return node and a
+   tail (the capped counts of the repeats around the site and the section frames its caller opened
+   above its own frame), interned per attempt. Equal ids mean equal continuations, by induction on
+   depth. Each open call is interned once while it stays open, so a key costs the same at any
+   depth. Only the pending calls made at this position are keyed in full (their starts, the guard's
+   section and counts), and positions only grow along the open calls, so they are a run at the top.
+8. **Only calls the failed-call memo does not record are recorded.** A call that never returned
+   is in the failed-call memo, whose key is a prefix of this one and is asked first. Keys of open
+   calls are kept in one flat list, so opening a call allocates nothing.
+9. **A trial per pass** (`CallContinuationMemo.Pays`): after 16,384 keys the memo stops building
+   them unless one in 64 hit. Sound by construction: `AlreadyFailed` returns false before any key is
+   built (`if (!keyed || ... || !Pays(memo)) return false;`), so the call is neither failed nor
+   recorded, which only loses pruning. Measured (Release, indicative, best of 3-25, machine busy):
+
+   | Row | Off | On, with the trial | On, without |
+   |---|---|---|---|
+   | `(?P<g>a(?&g)?c)(?:x){s<=1}`, a x 1000 | 423 ms | 455 ms, 77.9 MB as off | 497 ms |
+   | `(?:(?P<g>a(?&g)?c)x){s<=1}`, a x 1000 | 577 ms, 52.1 MB | 598 ms, 55.6 MB | 654 ms, 159.7 MB |
+   | D99 witness | 4.05 ms | 0.347 ms | 0.330 ms |
+   | `{d<=2}` witness | 0.107 ms | 0.065 ms | 0.063 ms |
+   | `(?:(?P<g>[ab](?&g)*c\|[ab])){e<=2}` | 13.3 ms | 1.40 ms | 1.35 ms |
+   | D68 rows, K = 0, 25, 400 | | within 8% of off | within 8% of off |
+   | `d93/calls.jsonl`, first 500 rows | 139 ms | 28.6 ms | 25.8 ms |
+
+   It earns 8-14 points on the deep rows and costs nothing measurable elsewhere, so it stays.
+10. **No key while a level holds a late start** (`CallContinuationMemo.LateStart`). A link keys a
+    level's starts as before the position, which needs every start at or before the call's own
+    position, and a slot can hold one after it: `(?:(?:(?&g)c?|){2,3}$(?P<g>a(?&g)?)){e<=1}` over
+    'abyb' made a call at 1 with its optional pass's slot at 4 (the counts grid's assert). Sound
+    by construction: `memo.LateLevels > 0` returns false in the same line as the trial. It is not a
+    performance choice and cannot be dropped without keying such starts in the link.
+11. **No key when a pending call's section has closed.** The guard compares section frames by
+    their place on the saved stack, and a call made at this position whose frame is no longer on
+    the chain of open frames (seen with `(?R)` under a fuzzy section, e.g.
+    `(?:[ab](?R)?b?|ab){d<=3}` over 'abbababaabaaac', 10 calls in 600 rows) cannot be keyed exactly:
+    `FrameIndex` returns -2 and the call gets no key. The first build mapped such a frame to -1, as
+    to "no section"; no counterexample was found, but the mapping was not exact.
+12. **A re-opened call's level takes the call's own position and section**, from the record on the
+    backtracking stack, not the state the return left (found by the assert in `LinkOf`).
+
+Growth after the fix (Release, indicative, best of 3; answer None throughout):
+
+| Row, n | Off | On |
+|---|---|---|
+| `(?P<g>a(?&g)?c)(?:x){s<=1}`, 500 | 73 ms, 19.0 MB | 79 ms, 19.0 MB |
+| the same, 1000 | 327 ms, 77.9 MB | 350 ms, 77.9 MB |
+| the same, 2000 | 1,806 ms, 163.0 MB | 1,850 ms, 163.0 MB |
+| `(?:(?P<g>a(?&g)?c)x){s<=1}`, 500 | 103 ms, 13.0 MB | 107 ms, 16.6 MB |
+| the same, 1000 | 453 ms, 52.1 MB | 476 ms, 55.6 MB |
+| the same, 2000 | 2,404 ms, 208.1 MB | 2,437 ms, 211.6 MB |
+
+The D99 witness now takes 4,367 Debug steps (3,497 before the fix, 76,446 on main): calls that
+never returned are left to the failed-call memo, which is emptied per pass rather than per attempt.
+
+Gates after the fix: ratchet GREEN (10,395 tests); oracle seeds 7 and 4242 clean, seed 20261118 the
+same two call-free rows as before (2850, 3889).
+
+Audit after the fix (Debug; default threshold / eager; every row also run on a main 56fcabfb
+worktree build): 0 counterexamples, 0 on/off diffs, 0 failed-call memo diffs, and 0 answers that
+differ from main in 315,134 row runs.
+
+| Corpus | Rows | Keyed calls (default / eager) | Would-be hits (default / eager) |
+|---|---|---|---|
+| Deep rows (n = 200) | 2 | 32,768 / 32,768 | 0 / 0 |
+| Battery call rows | 10,597 | 1,039 / 2,851 | 77 / 82 |
+| `calls.jsonl` first 5,000 | 3,994 | 197,044 / 212,956 | 166,090 / 166,782 |
+| Generated grid | 10,206 | 22,226 / 56,888 | 8,334 / 8,423 |
+| Guard grid | 23,040 | 10,143 / 33,301 | 2 / 2 |
+| Starts grid | 12,960 | 40,144 / 60,519 | 22,772 / 23,685 |
+| Counts grid (repeats with minimums around call sites) | 96,768 | 117,471 / 281,498 | 13,533 / 20,560 |
+
+#### Key parts with no witness test
+
+- **The count cap at a repeat's minimum** (where its maximum is unbounded) is exact. Every reader of
+  a repeat's count compares it with the minimum only: `EmptyIterationAdmitted` (Matcher.cs ~11233,
+  `Count <= min` after the increment), the repeat ends (~24312-24372, `Count >= min`, and the
+  maximum test, which is always true for an unbounded maximum), the body and tail starts (~23483,
+  ~23560); the repeat memo caps the same way (~11632). The continuation can only change a count by
+  an increment followed by these tests, and a decrement that undoes its own increment, so counts
+  at or above the minimum answer every test alike.
+- **The inserted-behind bit** is read only by `DeletionRepeatsAnEarlierAlternative` (~11982), a
+  prune that drops a deletion only when an earlier alternative reaches the same state
+  (`FailedCallKey`'s remarks, ~5928-5931), so it cannot change whether the continuation matches: no
+  witness can exist. It stays because it costs one value and matches D94's key (~10990).
+- **The repeats and passes around each site** (`AddLevel`, and the counts in each link) and **the
+  guard's section and counts for pending calls at this position** have readers (the empty-iteration
+  and optional-pass rules, ~6313, ~11225, ~11380; the guard, `TryOpenCall` ~5660), so they stay, but
+  no witness was found: removing each in turn gave no counterexample and no answer change on the
+  generated, guard, starts and counts grids (eager) after the fix. They are open items under
+  VERIFICATION rule 12, not proved redundant.
+
+#### After the fix round's blind review (2026-11-18, `.scratch/d99r2/review.md`)
+
+No wrong answer found. Changes:
+
+- **The O(1) key is pinned.** `WorkCounter.CallContinuationLevelsInterned` counts levels interned;
+  `CallContinuationMemoTests.Each_open_call_is_interned_once_however_deep_the_recursion` bounds it
+  by twice the keys built on the deep row. Debug: 16,384 keys and 16,269 levels at depth 200, 16,341
+  at 400; with the cache in `LinkOf` dropped (the review's mutant), 1,216,115 and 3,075,705, and the
+  test fails.
+- **The key encodes exactly.** Every segment whose length varies is now preceded by its length (the
+  failed-call key, each section list, the run of levels made at the position); every other segment
+  has a length fixed by a value written before it (a return node fixes the repeats and passes
+  around its site, `AddStart`'s first value fixes its own length, the pattern fixes a guard
+  entry's section part). So a key decodes one way. Before, the counts trailed their segments.
+- **Item 11, the section frame off the chain, is reachable.** The review read it as unreachable
+  (END_FUZZY pops only the top frame). It is reached: `(?:[ab](?R)?a+|a+){i<=1,d<=2}` over
+  'ababbbcbaaab' gives 4 such keys, with or without the eager switch. No mechanism is named yet, so
+  it stays a switch-off, not an assert (an assert would fail on that row), and the comment at
+  `CallContinuationMemo.FrameIndex` now says so. No witness of a wrong answer: mapping it to "no
+  section", as the first build did, changed no answer on any grid.
+- **The late-start guard (item 10) has no witness, and none can exist.** A start after the
+  position its call was made at is stale: matching moves forward here (the memo is off in reverse),
+  so every iteration or pass on the path began at or before the position, and a start the path
+  did not write is from an abandoned branch. Such a start is never read before it is written
+  again: a repeat writes `Start` when the path enters the iteration (Matcher.cs ~24539, ~24793,
+  ~24866, ~25101) and its end reads only that; an optional pass's slot is written by its branch
+  and read only at its end (`OpenOptionalPass` remarks, Matcher.cs ~11275). So keying such a level
+  as `LinkOf` does, every start as "before the position", is already exact. The guard
+  (`memo.LateLevels > 0` in `AlreadyFailed`, CallContinuationMemo.cs:353) only switches the memo
+  off and keeps the assert in `AddStaticLevel` (~:840) literal; it was found by that assert, not by
+  an answer. The review's mutant without it: 0 diffs, with 92,684 hits taken while a late level
+  was open.
+- **The re-opened call's position and section (item 12)** are correct by construction: both come
+  from the call's own record on the backtracking stack (Matcher.cs ~22078), and `BuildKey` asserts
+  on every key that a level's section is the guard's own record of it (CallContinuationMemo.cs:709);
+  before the fix that assert fired on `calls.jsonl` rows. The position feeds only the late-start
+  switch-off above, so it cannot change an answer. No answer witness was found (review mutant 4,
+  two seeds, 0 diffs); the assert is the check, and the Debug grids run it on every key (281,498
+  keys on the counts grid alone).
+
 ## The four proof obligations (draft 2026-11-17, not yet reviewed)
 
 Written by an Opus subagent from the code alone; every claim is a hypothesis until the audit mode

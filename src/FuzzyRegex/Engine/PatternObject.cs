@@ -718,6 +718,25 @@ internal sealed class PatternObject
     internal bool EagerCallMemo;
 
     /// <summary>
+    /// NOT UPSTREAM (D99): what the continuation memo reads of the pattern, or null where it is off
+    /// for the pattern (<see cref="CallContinuationTables.For"/>).
+    /// </summary>
+    internal CallContinuationTables? ContinuationTables;
+
+    /// <summary>
+    /// NOT UPSTREAM (D99), and never set by this library: whether the continuation memo is off
+    /// whatever <see cref="ContinuationTables"/> says. Tests and probes set it to compare answers.
+    /// </summary>
+    internal bool SkipContinuationMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM (D99), and never set by this library: whether the continuation memo only flags a
+    /// hit rather than taking it, so a Debug build can report a match found inside a flagged call
+    /// (<see cref="CallContinuationMemo.CheckAudit"/>).
+    /// </summary>
+    internal bool AuditContinuationMemo;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether the failed-call memo's key leaves out
     /// the position, a deliberately wrong key, so a call that failed at one position fails at
     /// every other. The matrix's check C5 sets it to prove the check can see a broken call memo
@@ -1691,6 +1710,8 @@ internal sealed class PatternObject
             self.CallReadGroups = [.. tested.Select(g => (g - 1, CallReadOf(self, self.GroupInfoList[g - 1])))];
         }
 
+        bool testsAGroup = tested.Count > 0;
+
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index. A run is of fuzzy items, so
         // an exact pattern has none.
@@ -1736,6 +1757,9 @@ internal sealed class PatternObject
 
             self.OptionalPassBranches = null;
         }
+
+        // NOT UPSTREAM (D99): see ContinuationTables. After the optional passes' ends are known.
+        self.ContinuationTables = CallContinuationTables.For(self, testsAGroup);
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);

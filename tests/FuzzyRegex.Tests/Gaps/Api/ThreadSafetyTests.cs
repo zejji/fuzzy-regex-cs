@@ -290,6 +290,10 @@ public sealed class ThreadSafetyTests
         threadStatic
             .Should()
             .Equal(
+                "WorkCounter.<CallContinuationCounterexamples>k__BackingField",
+                "WorkCounter.<CallContinuationHits>k__BackingField",
+                "WorkCounter.<CallContinuationKeys>k__BackingField",
+                "WorkCounter.<CallContinuationLevelsInterned>k__BackingField",
                 "WorkCounter.<CallFrameItemsSaved>k__BackingField",
                 "WorkCounter.<CallTracksMarked>k__BackingField",
                 "WorkCounter.<CapturesSaved>k__BackingField",
@@ -307,6 +311,7 @@ public sealed class ThreadSafetyTests
                 "WorkCounter.<GuardChecks>k__BackingField",
                 "WorkCounter.<GuardListsKept>k__BackingField",
                 "WorkCounter.<KeysHashed>k__BackingField",
+                "WorkCounter.<LastCallContinuationCounterexample>k__BackingField",
                 "WorkCounter.<LeadingStringFallbacks>k__BackingField",
                 "WorkCounter.<LeftRecursionReads>k__BackingField",
                 "WorkCounter.<LookaroundFoldVisits>k__BackingField",
@@ -967,6 +972,12 @@ public sealed class ThreadSafetyTests
             // (tools/matrix/port-runner.cs) and FailedCallMemoTests set it on a pattern compiled
             // for that one purpose.
             "PatternObject.CallMemoKeyOmitsPosition",
+            // D99: set once by Compile after the optional passes' ends; and the two switches,
+            // never written by the library, which CallContinuationMemoTests and the audit probes
+            // set on a pattern compiled for that one purpose.
+            "PatternObject.ContinuationTables",
+            "PatternObject.SkipContinuationMemo",
+            "PatternObject.AuditContinuationMemo",
             // D93's ablation, likewise never written by the library: the oracle's
             // RunWithTheReentryInANewSection and the matrix's xreentry variant set it on a pattern
             // compiled for that one call.

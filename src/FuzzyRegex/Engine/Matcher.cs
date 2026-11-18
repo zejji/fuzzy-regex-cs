@@ -5621,6 +5621,12 @@ internal static class Matcher
             }
         }
 
+        // NOT UPSTREAM (D99): see CallContinuationMemo.Closed.
+        if (state.ContinuationMemoOn)
+        {
+            CallContinuationMemo.Closed(state);
+        }
+
         state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
         if (state.Pattern.NestsFuzzySections)
         {
@@ -16068,6 +16074,12 @@ internal static class Matcher
             state.OpenCallSpans?.Clear();
         }
 
+        // NOT UPSTREAM (D99): see CallContinuationMemo.StartAttempt.
+        if (state.ContinuationMemoOn)
+        {
+            CallContinuationMemo.StartAttempt(state);
+        }
+
         state.ReachedLow = int.MaxValue;
         state.ReachedHigh = int.MinValue;
 
@@ -17767,6 +17779,9 @@ internal static class Matcher
                     }
 
                     AssertMatchIsClosed(state);
+
+                    // NOT UPSTREAM (D99), Debug only: see CallContinuationMemo.CheckAudit.
+                    CallContinuationMemo.CheckAudit(state);
                     return MatchStatus.Success;
                 default:
                     throw Seam.For(node.Op);
@@ -20380,6 +20395,13 @@ internal static class Matcher
             return _armBacktrack;
         }
 
+        // NOT UPSTREAM (D99): the same for a call whose continuation, too, was tried in full. See
+        // CallContinuationMemo.
+        if (state.ContinuationMemoOn && CallContinuationMemo.AlreadyFailed(state, node, groupCallKeyed))
+        {
+            return _armBacktrack;
+        }
+
         if (
             !CountsOpenCalls(pattern)
                 ? !(state.ActiveCalls ??= []).Add((groupCallKey, groupCallReach))
@@ -20441,6 +20463,12 @@ internal static class Matcher
         if (groupCallSections)
         {
             (state.OpenCallSections ??= []).Add(groupCallSection);
+        }
+
+        // NOT UPSTREAM (D99): the continuation memo's record of the call. See CallContinuationMemo.
+        if (state.ContinuationMemoOn)
+        {
+            CallContinuationMemo.Opened(state, groupCallBstackAt, groupCallReturnNode);
         }
 
         // D101 (design note E4): a partial call's second pass builds no failed-call key, since the
@@ -21944,6 +21972,12 @@ internal static class Matcher
         // FailedCallKey and MatchState.OpenCalls.
         RecordFailedCall(state);
 
+        // NOT UPSTREAM (D99): see CallContinuationMemo.BacktrackedPast.
+        if (state.ContinuationMemoOn)
+        {
+            CallContinuationMemo.BacktrackedPast(state);
+        }
+
         // The call is no longer open: backtracking past it means it never happened.
         PopOpenCall(state, backtrackedPast: true);
 
@@ -22035,6 +22069,18 @@ internal static class Matcher
             )
             {
                 return MatchStatus.Illegal;
+            }
+
+            // NOT UPSTREAM (D99): before the callee's state comes back, with where and in which
+            // section the call was made.
+            if (state.ContinuationMemoOn)
+            {
+                CallContinuationMemo.Reopening(
+                    state,
+                    groupReturnBackNode,
+                    (int)(uint)groupReturnBackKey,
+                    pattern.NestsFuzzySections ? groupReturnBackSection.Frame : -1
+                );
             }
 
             // For the caller. The forward arm's exchange, run the other way round: the

@@ -386,6 +386,49 @@ internal static class WorkCounter
     [Conditional("DEBUG")]
     internal static void CallFrameSaved(int items) => CallFrameItemsSaved += items;
 
+    /// <summary>D99: calls the continuation memo built a key for on this thread.</summary>
+    [field: ThreadStatic]
+    internal static long CallContinuationKeys { get; private set; }
+
+    /// <summary>D99: of <see cref="CallContinuationKeys"/>, those whose key the memo held.</summary>
+    [field: ThreadStatic]
+    internal static long CallContinuationHits { get; private set; }
+
+    /// <summary>
+    /// D99: matches the continuation memo's audit saw succeed inside a call it would have failed,
+    /// on this thread, and the last one's pattern, subject and key.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CallContinuationCounterexamples { get; private set; }
+
+    /// <summary>The last counterexample <see cref="CallContinuationCounterexamples"/> counted.</summary>
+    [field: ThreadStatic]
+    internal static string? LastCallContinuationCounterexample { get; private set; }
+
+    /// <summary>
+    /// D99: open calls the continuation memo interned on this thread (<c>CallContinuationMemo.LinkOf</c>).
+    /// Each open call is interned at most once while it stays open, so this stays within the calls
+    /// made however deep the recursion, where re-interning the chain at every key grows with depth.
+    /// </summary>
+    [field: ThreadStatic]
+    internal static long CallContinuationLevelsInterned { get; private set; }
+
+    [Conditional("DEBUG")]
+    internal static void CallContinuationLevelInterned() => CallContinuationLevelsInterned++;
+
+    [Conditional("DEBUG")]
+    internal static void CallContinuationKeyed() => CallContinuationKeys++;
+
+    [Conditional("DEBUG")]
+    internal static void CallContinuationHit() => CallContinuationHits++;
+
+    [Conditional("DEBUG")]
+    internal static void CallContinuationCounterexample(string what)
+    {
+        CallContinuationCounterexamples++;
+        LastCallContinuationCounterexample = what;
+    }
+
     /// <summary>Counts one group body whose widest match was walked.</summary>
     [Conditional("DEBUG")]
     internal static void GroupWidthMeasured() => GroupWidthsMeasured++;

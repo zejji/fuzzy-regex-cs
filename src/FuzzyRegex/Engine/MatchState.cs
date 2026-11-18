@@ -909,6 +909,17 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal long CallMemoHits;
 
+    /// <summary>
+    /// NOT UPSTREAM (D99): whether the continuation memo is on for this pass
+    /// (<see cref="CallContinuationMemo"/>), set by <see cref="InitMatch"/>.
+    /// </summary>
+    internal bool ContinuationMemoOn;
+
+    /// <summary>
+    /// NOT UPSTREAM (D99): the continuation memo's state. Null until a pass first switches the memo on.
+    /// </summary>
+    internal CallContinuations? Continuations;
+
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
 
@@ -1957,6 +1968,13 @@ internal sealed class MatchState : IDisposable
         }
         CallsThisPass = 0;
         CallMemoThreshold = long.MaxValue;
+        ContinuationMemoOn = false;
+        if (Continuations is { } continuations)
+        {
+            continuations.Clear();
+            continuations.KeysThisPass = 0;
+            continuations.HitsThisPass = 0;
+        }
         CallMemoKey?.Clear();
         CallMemoAncestors?.Clear();
         VerbMarks.Clear();
@@ -2823,6 +2841,7 @@ internal sealed class MatchState : IDisposable
             CallMemoThreshold = Pattern.EagerCallMemo ? 0 : ((long)SliceEnd - SliceStart + 1) * Pattern.GroupCallSites;
         }
 
+        ContinuationMemoOn = CallContinuationMemo.StartPass(this);
         if (FailedCalls is not { Count: > 0 })
         {
             return;
