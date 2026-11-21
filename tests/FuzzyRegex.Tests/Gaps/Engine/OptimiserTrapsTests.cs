@@ -414,8 +414,14 @@ public sealed class OptimiserTrapsTests
 
     [Test]
     [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every position")]
+    [NotInParallel]
     public void An_alternation_of_literals_searches_for_all_of_them_at_once()
     {
+        // Alone since D166 (2026-11-21): the literal sweep now polls the clock between 64 Ki
+        // chunks, so a pause another test causes (a collection, a busy core) inside the four
+        // megabytes is seen and spends the 25 ms budget. Before D166 the sweep was one call the
+        // clock could not interrupt. It failed once in the full suite and passed three runs in
+        // three alone.
         // A single literal is found with one vectorised search; an alternation of literals had
         // none, so every position ran each alternative in turn. Over the four megabytes below
         // this port took about 120 ms and upstream 162 ms; S60b item 14 searches for every
