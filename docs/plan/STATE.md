@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 22:30 by Claude Code (D160 oracle green, row 3862 registered D170; D166 uncommitted, RAM-gated).
+**Updated:** 2026-11-21 21:45 (machine clock) by Claude Code builder (D160, D166 commits waiting for 9 GB free RAM; D166 perf checks under way).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -46,8 +46,10 @@ measurement, WPR profiles and benchmarks.
   (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
   `Gaps/Api/PrefixSweepPollTests.cs` (25 tests): 4 sweeps (single, alternation, ignore-case, outlier) red without the
   fix, green with; one-chunk controls; boundary tests fail when the overlap is removed (mutation, 11 fail); outlier
-  route proven by reverting that site alone. Left: commit, full suite + ratchet, oracle, perf differential vs main +
-  WPR + allocation check (non-hostile and hostile rows), KNOWN-DEFECTS D166 row, merge.
+  route proven by reverting that site alone. Perf (harness `.scratch/d166/perf.cs`, Release, worktree `d166-main` at
+  main): answers identical on 29 rows; 0 B per call on main and fix, every row; A-B-B-A timing NOT SETTLED (A-A spread
+  0.26-2.5x, `.scratch/d166/summary-1.txt`), retake on a quiet machine; WPR traces `.scratch/d166/wpr-*.etl` being
+  read (delete after). Left: commit, ratchet, oracle, timing retake, KNOWN-DEFECTS D166 row, merge.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
