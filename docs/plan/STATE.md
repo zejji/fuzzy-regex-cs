@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 21:45 (machine clock) by Claude Code builder (D160, D166 commits waiting for 9 GB free RAM; D166 perf checks under way).
+**Updated:** 2026-11-21 22:38 (machine clock) by Claude Code builder (D160 tooling merged 2a4c5d6b; D166 WIP 4ac2d751, post-merge ratchet then oracle running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,23 +39,18 @@ measurement, WPR profiles and benchmarks.
 ## In flight
 
 - CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
-- judge-row D160 fix in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted). Gates: ratchet
-  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle: only DIVERGE is row 3862, new from today's date seed
-  and identical on main (`.scratch/judge-d160/main-rerun.log`), registered D170. So GREEN: commit (status stamp), merge.
-- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, UNCOMMITTED: commit waited for RAM,
-  5 GB free). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
-  (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
-  `Gaps/Api/PrefixSweepPollTests.cs` (25 tests): 4 sweeps (single, alternation, ignore-case, outlier) red without the
-  fix, green with; one-chunk controls; boundary tests fail when the overlap is removed (mutation, 11 fail); outlier
-  route proven by reverting that site alone. Perf (harness `.scratch/d166/perf.cs`, Release, worktree `d166-main` at
-  main): answers identical on 29 rows; 0 B per call on main and fix, every row; A-B-B-A timing NOT SETTLED (A-A spread
-  0.26-2.5x, `.scratch/d166/summary-1.txt`), retake on a quiet machine; WPR traces `.scratch/d166/wpr-*.etl` being
-  read (delete after). Left: commit, ratchet, oracle, timing retake, KNOWN-DEFECTS D166 row, merge.
-- D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
-  `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
-  upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
+- judge-row D160 tooling fix merged to main 2a4c5d6b (branch 895c07c8; recorded on F150), not pushed.
+- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, WIP 4ac2d751, main 2a4c5d6b being
+  merged in). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
+  (64 Ki, or 4m) start positions, overlap m - 1. `Gaps/Api/PrefixSweepPollTests.cs` (25 tests, red/green and mutation
+  proven). `OptimiserTrapsTests.An_alternation_of_literals...` made `[NotInParallel]`: its 25 ms budget is now
+  observed inside the sweep and failed once in the full suite (passed 3/3 alone). Ratchet GREEN 10,422 (pre-merge).
+  Perf (`.scratch/d166/perf.cs`, Release, worktree `d166-main`): answers identical on 29 rows; 0 B per call on main
+  and fix; WPR (`.scratch/d166/prof-*.txt`): IndexOf 39.3% main vs 39.0% fix, no new frame; A-B-B-A timing NOT
+  SETTLED twice (A-A spread 0.26-2.5x, `summary-1.txt`, `summary-2.txt`): retake on a quiet machine. Running: ratchet
+  after the merge (`.scratch/d166/ratchet.log`), then oracle 3 seeds. Left: commit merge, oracle, register row, merge.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D160: commit, merge (RAM-gated); (2) D166: commit WIP when RAM allows, then gates (ratchet, oracle 3 seeds) and perf differential/WPR/allocation via subagents, KNOWN-DEFECTS row, merge; (3) D167; (4) D163.
+**Next action:** (1) D166: finish gates (ratchet after merging main, oracle 3 seeds), KNOWN-DEFECTS row, merge at 14 GB under commit.lock; timing retake on a quiet machine (morning); (2) D167; (3) D163.
