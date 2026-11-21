@@ -16,7 +16,9 @@ The row's question and upstream's answer come from the sweep's wave, line N of
 TestResults/oracle/sweep-S/wave.jsonl (line 0 is the header, so line N is row N). Both answers'
 one-line descriptions come from the same sweep's report.txt, whose DIVERGE block prints upstream's
 answer and this port's, each as its Describe() text. The row must be a DIVERGE or FAULT block: a
-row a key already claims needs no judgement.
+row a key already claims needs no judgement. Where a DIVERGE block also gives this port's answer in
+upstream's terms for change positions (D160: a reversed substitution or insertion is reported one
+character later), that answer is the one pinned, since the consumer compares in those terms.
 
 The port line is pinned as this port's answer, so the report must come from the library being
 judged. run-oracle.ps1 ends every report with `port build: src <tree>`, git's tree id for src/;
@@ -63,6 +65,10 @@ QUESTION_KEYS = ("pattern", "flags", "namedLists", "subject", "operation", "temp
 # A crash row's upstream answer, matching JudgedDivergences.CrashedMarker in the consumer.
 CRASHED_MARKER = "<upstream crashed>"
 
+# Starts a DIVERGE block's line giving this port's answer in upstream's terms for change positions
+# (D160), matching OracleWave.UpstreamChangePositionsLabel in the consumer.
+UPSTREAM_CHANGE_POSITIONS_LABEL = "  port (upstream change positions, D160) "
+
 CODEPOINTS_SUFFIX = re.compile(r"   \[python codepoints -?\d+,-?\d+\]$")
 
 
@@ -105,7 +111,10 @@ def report_answers(report: str, row: int) -> tuple[str, str, bool]:
     upstream = re.search(r"^  upstream (.*)$", block, re.M).group(1)
     port = re.search(r"^  port     (.*)$", block, re.M)
     if m.group(1) == "DIVERGE":
-        return CODEPOINTS_SUFFIX.sub("", upstream), port.group(1), False
+        # D160: a judged row stores this port's answer in upstream's terms for change positions,
+        # which is what the consumer compares; the block gives it on its own line when it differs.
+        in_upstream_terms = re.search(rf"^{re.escape(UPSTREAM_CHANGE_POSITIONS_LABEL)}(.*)$", block, re.M)
+        return CODEPOINTS_SUFFIX.sub("", upstream), (in_upstream_terms or port).group(1), False
     if not upstream.startswith("upstream crashed (exit "):
         raise SystemExit(f"row {row} is a FAULT the MSan screen attributed, not a plain crash; judge it with the screen")
     if not port:

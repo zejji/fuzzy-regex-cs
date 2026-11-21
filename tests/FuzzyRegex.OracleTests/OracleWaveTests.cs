@@ -2871,6 +2871,35 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_divergence_block_also_gives_the_port_answer_in_upstreams_change_positions()
+    {
+        // D160: this port reports a reversed substitution at the character it changed, upstream one
+        // character after it, and a judged row stores the port answer in upstream's terms, because
+        // that is what JudgedDivergenceTests and ExpectedDivergences.For compare. tools/judge-row.py
+        // pins this line when the block has it. Upstream's answer here is made up so the row
+        // diverges; only the port lines matter.
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(
+            """
+            {"generator": "fuzzy", "pattern": "(?r)(?:abc){s<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "fuzzy", "pattern": "(?:abc){s<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            """
+        );
+
+        OracleRunSummary run = OracleComparer.RunWave(rows, static row => OracleComparer.Run(row));
+
+        run.Divergences.Should().HaveCount(2);
+        string reversed = run.Divergences[0];
+        string live = OracleComparer.Run(rows[0])!.Describe();
+        string upstreamTerms = OracleComparer.RunReportingUpstreamChangePositions(rows[0])!.Describe();
+        upstreamTerms.Should().NotBe(live, "the witness must move a change position");
+        reversed.Should().Contain("  port     " + live + Environment.NewLine);
+        reversed.Should().EndWith(OracleWave.UpstreamChangePositionsLabel + upstreamTerms);
+        run.Divergences[1]
+            .Should()
+            .NotContain(OracleWave.UpstreamChangePositionsLabel, "a forward row's positions are already upstream's");
+    }
+
+    [Test]
     public void A_row_the_screen_attributes_to_a_known_upstream_defect_is_counted_and_not_compared()
     {
         // The MSan screen (tools/screen-undefined.py) annotates a row on which upstream read memory
