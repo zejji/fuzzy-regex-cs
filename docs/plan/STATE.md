@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 22:38 (machine clock) by Claude Code builder (D160 tooling merged 2a4c5d6b; D166 WIP 4ac2d751, post-merge ratchet then oracle running).
+**Updated:** 2026-11-21 22:57 (machine clock) by Claude Code builder (D166 gates GREEN, merge waiting for 14 GB free).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -40,15 +40,16 @@ measurement, WPR profiles and benchmarks.
 
 - CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
 - judge-row D160 tooling fix merged to main 2a4c5d6b (branch 895c07c8; recorded on F150), not pushed.
-- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, WIP 4ac2d751, main 2a4c5d6b being
-  merged in). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
+- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, WIP 4ac2d751, main merged in). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
   (64 Ki, or 4m) start positions, overlap m - 1. `Gaps/Api/PrefixSweepPollTests.cs` (25 tests, red/green and mutation
   proven). `OptimiserTrapsTests.An_alternation_of_literals...` made `[NotInParallel]`: its 25 ms budget is now
   observed inside the sweep and failed once in the full suite (passed 3/3 alone). Ratchet GREEN 10,422 (pre-merge).
   Perf (`.scratch/d166/perf.cs`, Release, worktree `d166-main`): answers identical on 29 rows; 0 B per call on main
   and fix; WPR (`.scratch/d166/prof-*.txt`): IndexOf 39.3% main vs 39.0% fix, no new frame; A-B-B-A timing NOT
-  SETTLED twice (A-A spread 0.26-2.5x, `summary-1.txt`, `summary-2.txt`): retake on a quiet machine. Running: ratchet
-  after the merge (`.scratch/d166/ratchet.log`), then oracle 3 seeds. Left: commit merge, oracle, register row, merge.
+  SETTLED twice (A-A spread 0.26-2.5x, `summary-1.txt`, `summary-2.txt`): retake on a quiet machine.
+  Branch 2a9bdb9c (main merged in): ratchet GREEN 10,422; oracle 3 seeds only row 3862 (D170), block identical to
+  the judge-d160 run. 10 ms timeout, hostile rows: main ran 68-642 ms and answered false, fix threw at 14-64 ms
+  (`.scratch/d166/budget-*.txt`). Left: register row, merge at 14 GB under commit.lock.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
