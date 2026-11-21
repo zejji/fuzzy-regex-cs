@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 by Claude Code (main pushed 40f09940; item 16 added by the owner).
+**Updated:** 2026-11-21 21:15 by Claude Code (session handover: judge-d160 gates running, D166 plan in In flight).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -42,6 +42,11 @@ measurement, WPR profiles and benchmarks.
   blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
   C# test red/green proven 2026-11-21. Gates running: `.scratch/judge-d160/gates.sh` (bash PID 58192), logs
   `.scratch/judge-d160/ratchet.log`, `oracle.log` end with EXIT; then commit (status stamp), merge.
+- Item 16 A plan (D166): new worktree; red test first in `Gaps/Api/TimeoutAndCancellationTests` style with
+  `ExpiresOnCheck = 2`: literal `"ab"` x 1999 + `"cb"` over `"ab"` x 500,000 must throw `RegexMatchTimeoutException` (today
+  returns false: check 1 is at `start_match`, `StringSearch`'s `IndexOf` (`Matcher.cs:14672`) has none). FIRST confirm that
+  pattern reaches `StringSearch` and not the leading-literal `IndexOfAny` (`:16204`); test both paths, ignore case, and a
+  boundary test (occurrence at every offset chunk end - m + 1 .. chunk end). Fix: chunks of max(64 Ki, 4m), overlap m - 1.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
