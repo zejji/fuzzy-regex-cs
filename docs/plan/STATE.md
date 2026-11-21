@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 21:15 by Claude Code (session handover: judge-d160 gates running, D166 plan in In flight).
+**Updated:** 2026-11-21 21:45 by Claude Code (D166 fix built and proven, uncommitted; D160 oracle running; CI green on 40f09940).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -37,16 +37,17 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- CI RED on main 5f1fff61 (run 44289288199): fixed on main 840d6caa, pushed 2026-11-21 (40f09940); check CI.
-- judge-row D160 fix started 09:45 in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted): DIVERGE
-  blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
-  C# test red/green proven 2026-11-21. Gates running: `.scratch/judge-d160/gates.sh` (bash PID 58192), logs
-  `.scratch/judge-d160/ratchet.log`, `oracle.log` end with EXIT; then commit (status stamp), merge.
-- Item 16 A plan (D166): new worktree; red test first in `Gaps/Api/TimeoutAndCancellationTests` style with
-  `ExpiresOnCheck = 2`: literal `"ab"` x 1999 + `"cb"` over `"ab"` x 500,000 must throw `RegexMatchTimeoutException` (today
-  returns false: check 1 is at `start_match`, `StringSearch`'s `IndexOf` (`Matcher.cs:14672`) has none). FIRST confirm that
-  pattern reaches `StringSearch` and not the leading-literal `IndexOfAny` (`:16204`); test both paths, ignore case, and a
-  boundary test (occurrence at every offset chunk end - m + 1 .. chunk end). Fix: chunks of max(64 Ki, 4m), overlap m - 1.
+- CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
+- judge-row D160 fix in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted). Gates: ratchet
+  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle running (`oracle.log`, ends `ORACLE EXIT`, in MSan screening
+  at 21:40). On EXIT 0 with only known rows: commit (status stamp), merge.
+- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, UNCOMMITTED: commit waited for RAM,
+  5 GB free). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
+  (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
+  `Gaps/Api/PrefixSweepPollTests.cs` (25 tests): 4 sweeps (single, alternation, ignore-case, outlier) red without the
+  fix, green with; one-chunk controls; boundary tests fail when the overlap is removed (mutation, 11 fail); outlier
+  route proven by reverting that site alone. Left: commit, full suite + ratchet, oracle, perf differential vs main +
+  WPR + allocation check (non-hostile and hostile rows), KNOWN-DEFECTS D166 row, merge.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
@@ -54,4 +55,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (0) confirm CI green on 40f09940; (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) item 16 A (D166, D167); (3) D163: measure the two build costs in a quiet window (design note), then build or option 3.
+**Next action:** (1) D160: on `ORACLE EXIT` commit, merge; (2) D166: commit WIP when RAM allows, then gates (ratchet, oracle 3 seeds) and perf differential/WPR/allocation via subagents, KNOWN-DEFECTS row, merge; (3) D167; (4) D163.
