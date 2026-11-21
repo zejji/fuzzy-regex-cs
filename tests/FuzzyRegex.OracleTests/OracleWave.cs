@@ -47,6 +47,13 @@ internal static class OracleWave
     /// </remarks>
     public const string NeedsARecordedWave = "NeedsARecordedWave";
 
+    /// <summary>
+    /// Starts the line of a <see cref="Describe"/> block that gives this port's answer in upstream's
+    /// terms for change positions (D160). <c>tools/judge-row.py</c> pins that line's answer when the
+    /// block has one, so keep the two in step.
+    /// </summary>
+    public const string UpstreamChangePositionsLabel = "  port (upstream change positions, D160) ";
+
     /// <summary>Where the recorder writes the wave and where this consumer reads it.</summary>
     /// <remarks>
     /// <c>FUZZYREGEX_ORACLE_WAVE_PATH</c> overrides the fixed default when set. <c>tools/run-oracle.ps1</c>
@@ -593,12 +600,18 @@ internal static class OracleWave
     /// Replaces the heading <paramref name="accounted"/> would choose: <c>FAULT</c> for a row on which
     /// this port failed an assert.
     /// </param>
+    /// <param name="inUpstreamChangePositions">
+    /// This port's answer with its change positions reported where upstream reports them (D160),
+    /// when that differs from <paramref name="actual"/>: printed on a last line after
+    /// <see cref="UpstreamChangePositionsLabel"/>, which is the form a judged row stores.
+    /// </param>
     /// <returns>The rendered block.</returns>
     public static string Describe(
         OracleRow row,
         IOracleOutcome? actual,
         ExpectedDivergence? accounted = null,
-        string? heading = null
+        string? heading = null,
+        IOracleOutcome? inUpstreamChangePositions = null
     )
     {
         StringBuilder block = DescribeQuestion(
@@ -613,6 +626,11 @@ internal static class OracleWave
         if (actual is ErrorOutcome { Detail: { } detail })
         {
             block.AppendLine().Append("  " + detail.Replace("\n", "\n  ", StringComparison.Ordinal));
+        }
+
+        if (inUpstreamChangePositions is not null)
+        {
+            block.AppendLine().Append(UpstreamChangePositionsLabel + inUpstreamChangePositions.Describe());
         }
 
         return block.ToString();

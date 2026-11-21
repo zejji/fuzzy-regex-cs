@@ -155,7 +155,13 @@ internal static class OracleComparer
             tally[verdict] = tally.GetValueOrDefault(verdict) + 1;
             if (verdict == OracleVerdict.Diverge)
             {
-                divergences.Add(OracleWave.Describe(row, actual));
+                divergences.Add(
+                    OracleWave.Describe(
+                        row,
+                        actual,
+                        inUpstreamChangePositions: actual is null ? null : InUpstreamChangePositions(row, actual)
+                    )
+                );
                 candidates.Add(row.Number);
             }
             else if (accounted is not null)
@@ -1409,6 +1415,31 @@ internal static class OracleComparer
             ablate: static compiled => compiled.PatternObject.UpstreamChangePositions = true,
             composeWithD11: false
         );
+    }
+
+    /// <summary>
+    /// This port's answer to a row in upstream's terms for change positions, when that differs from
+    /// <paramref name="ours"/> and <paramref name="ours"/> is the live answer; otherwise
+    /// <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only for the live answer itself, so a test's made-up answer is never swapped for a re-run.
+    /// <see cref="ExpectedDivergences.For"/> judges an unaccounted row on it, and a DIVERGE block
+    /// prints it for <c>tools/judge-row.py</c> to pin.
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    /// <param name="ours">This port's answer to it.</param>
+    /// <returns>The answer from <see cref="RunReportingUpstreamChangePositions"/>, or <see langword="null"/>.</returns>
+    internal static IOracleOutcome? InUpstreamChangePositions(OracleRow row, IOracleOutcome ours)
+    {
+        IOracleOutcome? reported = RunReportingUpstreamChangePositions(row);
+        return
+            reported is not null
+            && !string.Equals(reported.Describe(), ours.Describe(), StringComparison.Ordinal)
+            && Run(row) is { } live
+            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal)
+            ? reported
+            : null;
     }
 
     /// <summary>
