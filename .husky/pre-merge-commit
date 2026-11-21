@@ -1,0 +1,19 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# The IDE inspections' merge gate (owner, DECISIONS 2026-11-21). Branch commits may skip them
+# (FUZZY_WIP_SKIP_INSPECTIONS in .husky/pre-commit), so the merge into main is where they must
+# pass. Runs only for a merge into main that brings in a .cs change. A fast-forward merge runs no
+# hook at all, which is why merges into main are --no-ff (STATE.md rules); a merge that stops on a
+# conflict is finished by `git commit`, where pre-commit refuses the skip on main and inspects.
+
+[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || exit 0
+changed=$(git diff --cached --name-only HEAD -- '*.cs')
+[ -z "$changed" ] && exit 0
+
+echo "pre-merge-commit: running IDE inspections on the merge into main (about four minutes) ..."
+inspect_out=".scratch/inspect-premerge-$$.xml"
+pwsh -NoProfile -File tools/check-inspections.ps1 -Output "$inspect_out" || {
+  echo "pre-merge-commit: IDE inspections RED - fix the findings on the branch (or see $inspect_out)."
+  exit 1
+}

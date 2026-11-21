@@ -27,7 +27,8 @@ measurement, WPR profiles and benchmarks.
 
 ## Rules
 
-- Commits under the `.scratch/s1024/commit.lock` mutex at 12 GB free (the .cs inspection needs ~9 GB);
+- WIP commits off main: `FUZZY_WIP_SKIP_INSPECTIONS=1` (no inspection). Merges into main: `--no-ff`; the
+  pre-merge-commit inspection runs under the `.scratch/s1024/commit.lock` mutex at 14 GB free (~10 GB, peer priority);
   start `.scratch/s1024/watchdog.ps1` and `jbguard.ps1` before builds.
 - Timing only on a quiet machine, LibreHardwareMonitor running, peer sessions told first.
 - Every perf change: WPR profile before/after, differential against main, oracle, allocation check,

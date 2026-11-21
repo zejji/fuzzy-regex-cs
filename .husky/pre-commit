@@ -79,6 +79,19 @@ fi
 
 # ReSharper's command-line inspector over the whole solution, ERROR severity, --no-build (the
 # caller has built; the ratchet always has). Fails the commit on any finding.
+#
+# A work-in-progress commit on a branch may skip it with FUZZY_WIP_SKIP_INSPECTIONS=1 (owner,
+# DECISIONS 2026-11-21): the run needs ~10 GB of RAM and four minutes, and overnight it held back
+# the checkpoint commits that keep work safe. The gate moves to the merge, where
+# .husky/pre-merge-commit runs it on main. Never on main itself, so main stays as guarded as before.
+if [ "${FUZZY_WIP_SKIP_INSPECTIONS:-}" = "1" ]; then
+  if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
+    echo "pre-commit: FUZZY_WIP_SKIP_INSPECTIONS is refused on main; unset it and commit again."
+    exit 1
+  fi
+  echo "pre-commit: IDE inspections SKIPPED (WIP commit off main); the merge into main runs them."
+  exit 0
+fi
 echo "pre-commit: running IDE inspections (about four minutes) ..."
 # Per-process output path: on 2026-09-15 two concurrent commits shared one file and the second
 # committer's inspection read the first's results.
