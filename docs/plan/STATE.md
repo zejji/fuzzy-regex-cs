@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 09:30 by Claude Code (D99 post-merge gates re-run from scratch).
+**Updated:** 2026-11-21 21:45 (machine clock) by Claude Code builder (D160, D166 commits waiting for 9 GB free RAM; D166 perf checks under way).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,14 +19,16 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); new D163 (compile-per-call rows 1.09-1.18x slower, +9-13% bytes): profile and bisect; D99 design in progress; then pick the next fix: recommended D116 (design note with options first) |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); new D163 (compile-per-call rows 1.09-1.18x slower, +9-13% bytes): profile and bisect; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); then pick the next fix: recommended D116 (design note with options first) |
+| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note (API, unit, scope) before code; D168, D169: WPR profile first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
 
 ## Rules
 
-- Commits under the `.scratch/s1024/commit.lock` mutex at 12 GB free (the .cs inspection needs ~9 GB);
+- WIP commits off main: `FUZZY_WIP_SKIP_INSPECTIONS=1` (no inspection). Merges into main: `--no-ff`; the
+  pre-merge-commit inspection runs under the `.scratch/s1024/commit.lock` mutex at 14 GB free (~10 GB, peer priority);
   start `.scratch/s1024/watchdog.ps1` and `jbguard.ps1` before builds.
 - Timing only on a quiet machine, LibreHardwareMonitor running, peer sessions told first.
 - Every perf change: WPR profile before/after, differential against main, oracle, allocation check,
@@ -36,11 +38,19 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- D99 merged to main 8887e325 (branch commit 8498b782). Post-merge gates running: `.scratch/main-gate/gates.sh`
-  (ratchet then oracle 3 seeds) re-launched 09:30, bash PID 30456 (watchdog 39256, jbguard 29216); logs
-  `.scratch/main-gate/ratchet-d99.log`, `oracle-d99.log` end with an EXIT line. Expected: ratchet GREEN
-  10,397; oracle diverging only on D164/D165 (judged rows, now EXPECTED). Then: D99 row to F155, worktree d99b
-  removed, push needs the owner. Open: FrameIndex -2 mechanism (memo switches off there), see the design note.
+- CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
+- judge-row D160 fix in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted). Gates: ratchet
+  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle: only DIVERGE is row 3862, new from today's date seed
+  and identical on main (`.scratch/judge-d160/main-rerun.log`), registered D170. So GREEN: commit (status stamp), merge.
+- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, UNCOMMITTED: commit waited for RAM,
+  5 GB free). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
+  (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
+  `Gaps/Api/PrefixSweepPollTests.cs` (25 tests): 4 sweeps (single, alternation, ignore-case, outlier) red without the
+  fix, green with; one-chunk controls; boundary tests fail when the overlap is removed (mutation, 11 fail); outlier
+  route proven by reverting that site alone. Perf (harness `.scratch/d166/perf.cs`, Release, worktree `d166-main` at
+  main): answers identical on 29 rows; 0 B per call on main and fix, every row; A-B-B-A timing NOT SETTLED (A-A spread
+  0.26-2.5x, `.scratch/d166/summary-1.txt`), retake on a quiet machine; WPR traces `.scratch/d166/wpr-*.etl` being
+  read (delete after). Left: commit, ratchet, oracle, timing retake, KNOWN-DEFECTS D166 row, merge.
 - D164/D165 judged port right, merged to main 88767f58 (F153, F154); ratchet GREEN 10,388 on main. Tooling gap:
   `tools/judge-row.py` stores a reversed fuzzy row's change positions in port terms, `JudgedDivergenceTests` wants
   upstream's (D160); row 3889 was hand-edited. Fix needs the port answer in upstream terms, which the report lacks.
@@ -48,4 +58,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) check the D99 post-merge gates (In flight); if green, move D99 to F155 in KNOWN-DEFECTS, remove `.claude/worktrees/d99b`, ask the owner to push; if red, stop and diagnose; (2) fix `tools/judge-row.py` (D160 terms); (3) D163: measure the two build costs in a quiet window (design note), then build or option 3.
+**Next action:** (1) D160: commit, merge (RAM-gated); (2) D166: commit WIP when RAM allows, then gates (ratchet, oracle 3 seeds) and perf differential/WPR/allocation via subagents, KNOWN-DEFECTS row, merge; (3) D167; (4) D163.
