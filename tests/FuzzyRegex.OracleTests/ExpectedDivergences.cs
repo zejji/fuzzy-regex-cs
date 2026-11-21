@@ -8627,14 +8627,8 @@ internal static class ExpectedDivergences
 
         // D160: the live answer reports a reversed change at the character, upstream after it.
         // Judged again in upstream's terms, a row whose divergence is that and something else is
-        // the something else's, and an answer stored before D160 still matches. Only for the live
-        // answer itself, so a test's made-up answer is never swapped for a re-run.
-        IOracleOutcome? reported = OracleComparer.RunReportingUpstreamChangePositions(row);
-        return
-            reported is not null
-            && !string.Equals(reported.Describe(), ours.Describe(), StringComparison.Ordinal)
-            && OracleComparer.Run(row) is { } live
-            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal)
+        // the something else's, and a judged answer, stored in upstream's terms, matches.
+        return OracleComparer.InUpstreamChangePositions(row, ours) is { } reported
             ? Array.Find(_entries, entry => entry.Applies(row, reported))
             : null;
     }
