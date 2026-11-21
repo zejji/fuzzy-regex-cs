@@ -1088,3 +1088,19 @@ amended text is inline above; this list is the record of what changed and why.
     Meanwhile the generator comes **off** `run-oracle.ps1`'s default list, because the default third
     seed is today's date and a generator red at some seeds is red on some days; S57e puts it back.
     Phase 6 is one slice longer; the estimate moves from 20-25 to 21-26.
+
+38. **Every scan that grows with the input polls, and a Release caller can budget work (owner,
+    2026-11-21; proposal from ZejPdf, `research/31-fuzzyregex-bounded-search-note.md` in that repo).**
+    Section 7's timeout and token promise (S51) holds inside the prefix sweeps as well as the matching
+    loop. (A) `StringSearch` and the leading-literal search run in chunks overlapping by the literal's
+    length minus one, with a poll between chunks; this reverses S60's single sweep (D166). (B) A public
+    per-call work budget, charged at the poll sites, gives a Release caller a bound that does not
+    depend on the machine; its counter also drives the poll cadence, so a turn that walks the input
+    cannot hold the poll back for 256 turns (D167). Its API, unit and per-method scope are settled in
+    a design note before any code. (C) `CountOne`, the fuzzy-literal piece searches and the linear
+    scans charge that counter; `[ab]*\d`'s quadratic run time (D168, inherited from upstream) and the
+    ignore-case screen's gap to .NET (D169) are profiled and fixed as performance rows. Evidence:
+    hostile prefix searches overran a 10 ms timeout to about 0.3 s, and `[ab]*\d` to about 10 s, at
+    10^7 characters (ZejPdf, Release, .NET 10.0.14). Bar: no measurable loss on the project's
+    benchmarks; equal to or better than .NET's `Regex` on those inputs. Amendment 37 (S82, branch
+    resets) is cited in ROADMAP and DECISIONS but its text was never added here.

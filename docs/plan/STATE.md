@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-18 22:45 by Claude Code (CI fix merged to main 840d6caa, not pushed; judge-row waits for squiggle's turn).
+**Updated:** 2026-11-21 by Claude Code (main pushed 40f09940; item 16 added by the owner).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -20,6 +20,7 @@ measurement, WPR profiles and benchmarks.
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
 | 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); new D163 (compile-per-call rows 1.09-1.18x slower, +9-13% bytes): profile and bisect; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); then pick the next fix: recommended D116 (design note with options first) |
+| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note (API, unit, scope) before code; D168, D169: WPR profile first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -36,11 +37,7 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
-- CI RED on main 5f1fff61 (run 44289288199): fixed on main 840d6caa (Release skip for the continuation interning test; ratchet
-  GREEN 10,397). Not pushed: push needs the owner, then check CI.
-- Overnight (owner 2026-11-18 21:45): wait for peers future-ide-69 and squiggle-mockups-2f to report done (asked, idle notices armed;
-  recheck at 01:00 if silent), then work autonomously until 07:40. future-ide-69 done 22:05; squiggle-mockups-2f resumed work 22:20
-  at the owner's request: take turns, ask it before any heavy build.
+- CI RED on main 5f1fff61 (run 44289288199): fixed on main 840d6caa, pushed 2026-11-21 (40f09940); check CI.
 - judge-row D160 fix started 09:45 in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted): DIVERGE
   blocks print a `port (upstream change positions, D160)` line, judge-row.py pins it. Pester test red/green proven;
   C# test `A_divergence_block_also_gives_the_port_answer_in_upstreams_change_positions` not yet built (waits for RAM).
@@ -51,4 +48,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (0) owner: push main (CI fix 840d6caa); (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) D163: measure the two build costs in a quiet window (design note), then build or option 3.
+**Next action:** (0) confirm CI green on 40f09940; (1) finish `tools/judge-row.py` (D160 terms, In flight): build, prove the C# test red/green, oracle tests, merge; (2) item 16 A (D166, D167); (3) D163: measure the two build costs in a quiet window (design note), then build or option 3.
