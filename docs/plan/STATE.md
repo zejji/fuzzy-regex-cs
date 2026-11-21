@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 21:45 by Claude Code (D166 fix built and proven, uncommitted; D160 oracle running; CI green on 40f09940).
+**Updated:** 2026-11-21 22:30 by Claude Code (D160 oracle green, row 3862 registered D170; D166 uncommitted, RAM-gated).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,9 +39,8 @@ measurement, WPR profiles and benchmarks.
 
 - CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
 - judge-row D160 fix in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted). Gates: ratchet
-  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle EXIT 1 (`oracle.log:3501`): one
-  DIVERGE, row 3862 (fuzzy change positions only). Opus subagent checking branch regression vs known row (read-only);
-  act on its verdict: fix and rerun the oracle, or commit (status stamp) and merge.
+  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle: only DIVERGE is row 3862, new from today's date seed
+  and identical on main (`.scratch/judge-d160/main-rerun.log`), registered D170. So GREEN: commit (status stamp), merge.
 - D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, UNCOMMITTED: commit waited for RAM,
   5 GB free). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
   (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
@@ -56,4 +55,4 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D160: on `ORACLE EXIT` commit, merge; (2) D166: commit WIP when RAM allows, then gates (ratchet, oracle 3 seeds) and perf differential/WPR/allocation via subagents, KNOWN-DEFECTS row, merge; (3) D167; (4) D163.
+**Next action:** (1) D160: commit, merge (RAM-gated); (2) D166: commit WIP when RAM allows, then gates (ratchet, oracle 3 seeds) and perf differential/WPR/allocation via subagents, KNOWN-DEFECTS row, merge; (3) D167; (4) D163.
