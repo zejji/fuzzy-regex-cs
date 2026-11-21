@@ -39,8 +39,9 @@ measurement, WPR profiles and benchmarks.
 
 - CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
 - judge-row D160 fix in `.claude/worktrees/judge-d160` (branch `fix/judge-row-d160`, uncommitted). Gates: ratchet
-  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle running (`oracle.log`, ends `ORACLE EXIT`, in MSan screening
-  at 21:40). On EXIT 0 with only known rows: commit (status stamp), merge.
+  GREEN 10,397 (`.scratch/judge-d160/ratchet.log`); oracle EXIT 1 (`oracle.log:3501`): one
+  DIVERGE, row 3862 (fuzzy change positions only). Opus subagent checking branch regression vs known row (read-only);
+  act on its verdict: fix and rerun the oracle, or commit (status stamp) and merge.
 - D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, UNCOMMITTED: commit waited for RAM,
   5 GB free). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
   (64 Ki, or 4m) start positions, overlap m - 1; `LeadingStringsMaxLength` now always set. New
