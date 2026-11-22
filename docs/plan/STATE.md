@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 00:12 (machine clock) by Claude Code builder (D166 gates GREEN; merge BLOCKED on RAM: free 11.8-13.6 GB since 22:55, rule needs 14).
+**Updated:** 2026-11-22 00:26 (machine clock) by Claude Code builder (D166 merge still waiting for 14 GB; D167 fix built test-first, gates running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -53,6 +53,13 @@ measurement, WPR profiles and benchmarks.
   needs 14 GB free; free RAM stayed 11.8-13.6 GB from 22:55 to 00:15 (peer session). Then: `git merge --no-ff
   fix/d166-chunked-sweeps` on main under commit.lock; move the row to Completed with `python .scratch/d166/register.py
   <merge hash>` (writes F156); item 16 row: D166 merged.
+- D167 (item 16 C) in `.claude/worktrees/d167` (branch `fix/d167-charged-walks` from the D166 branch, WIP 178c37df; tests
+  uncommitted until the ratchet stamps them). `CountOne` charges its walk to the 256-turn gate (`Matcher.ChargeTurns`:
+  one turn per character, next turn polls); the filter's piece searches (`PolledIndexOf`, `PolledLastIndexOf`, reverse
+  via `ReverseVerdict`) run in D166's chunks with a poll between. `Gaps/Api/WalkPollTests.cs` (25): greedy + 3 piece
+  searches red without the fix, controls green; mutations: charge removed 1 red, forward poll 2, reverse poll 1,
+  overlap 11. Left: ratchet (running, `.claude/worktrees/d167/.scratch/d167/ratchet.log`), oracle, perf differential
+  (`.scratch/d167/perf.cs`), WPR, allocation, register row, merge.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
