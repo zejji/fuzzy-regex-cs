@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 00:45 (machine clock) by Claude Code builder (D166 and D167 gates green; both merges waiting for 14 GB free RAM).
+**Updated:** 2026-11-22 01:37 (machine clock) by Claude Code builder (D166, D167 gates green; both merges waiting for 14 GB, free 10.1-12.5 GB since 00:30; the harness stopped the RAM wait under memory pressure).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -58,7 +58,8 @@ measurement, WPR profiles and benchmarks.
   chunks. Gates GREEN: `WalkPollTests` (25, red/green and mutation proven), ratchet GREEN 10,447, oracle 3 seeds only
   row 3857 (new D171, same answer on main), answers identical and 0 B per call vs base (`.scratch/d167/perf.cs`), WPR
   no new hot frame. Timing not settled (busy machine). Register row written (D167 fixed on branch). Merge after D166:
-  `git merge --no-ff fix/d167-charged-walks` on main under commit.lock at 14 GB, then move D167 to Completed.
+  `git merge --no-ff fix/d167-charged-walks` on main under commit.lock at 14 GB, then
+  `python .scratch/d167/register.py <merge hash>` (writes F157); STATE item 16: D167 merged, timing retake owed.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
