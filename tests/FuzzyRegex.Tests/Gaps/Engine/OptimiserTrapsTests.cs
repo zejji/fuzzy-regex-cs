@@ -458,6 +458,69 @@ public sealed class OptimiserTrapsTests
     }
 
     [Test]
+    // The first-set look-through is active for these: each skips a failed attempt's run.
+    [Arguments(@"[ab]*\d", "ab ab1", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
+    [Arguments(@"[ab]*\d", "1 abab", false, true, 0, -1, "(0,1) (2,6)P")]
+    [Arguments(@"[ab]*\d", "ab ab1 ab", false, false, 1, 7, "(3,6)")]
+    [Arguments(@"[ab]*\d", "ab ab1 ab", false, false, 4, -1, "(4,6)")]
+    [Arguments(@"[ab]*\d", "ab\nab1", false, false, 0, -1, "(3,6)")]
+    [Arguments(@"([ab]*)(\d)", "ab ab1", true, false, 0, -1, "(3,6)g(3,5)(5,6) (4,6)g(4,5)(5,6) (5,6)g(5,5)(5,6)")]
+    [Arguments(@"[ab]*(?<=a)\d", "ba22b", true, false, 0, -1, "(0,3) (1,3) (2,3)")]
+    [Arguments(@"[ab]*(?<=a)\d", "ab ab1", false, true, 0, -1, "(6,6)P")]
+    [Arguments(@"[ab]*(?<=ab)\d", "bb ab1", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
+    [Arguments(@"[ab]*(?=\d)", "ab ab1", false, false, 0, -1, "(3,5) (5,5)")]
+    [Arguments(@"[ab]*b\d", "ab ab1", true, false, 0, -1, "(3,6) (4,6)")]
+    [Arguments(@"[ab]*(?:ab)+\d", "ab ab1", true, false, 0, -1, "(3,6)")]
+    [Arguments(@"(?m)[ab]*\d$", "ab1x\nab2", true, false, 0, -1, "(5,8) (6,8) (7,8)")]
+    [Arguments(@"[ab]*\G\d", "ab ab1", false, false, 5, -1, "(5,6)")]
+    [Arguments(@"[ab]*\K\d", "ab ab1", false, false, 0, -1, "(5,6)")]
+    [Arguments(@"[ab]*(*SKIP)\d", "ab ab1", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
+    [Arguments(@"[ab]*(*PRUNE)\d", "ab ab1", false, false, 0, -1, "(3,6)")]
+    [Arguments(@"(?p)[ab]*\d", "ab ab1", false, false, 0, -1, "(3,6)")]
+    [Arguments(@"(?b)[ab]*\d", "ab ab1", false, false, 0, -1, "(3,6)")]
+    [Arguments(@"(?e)[ab]*\d", "ab ab1", false, false, 0, -1, "(3,6)")]
+    [Arguments(@"(?V1)[[ab]--[b]]*\d", "ab ab1", false, false, 0, -1, "(5,6)")]
+    [Arguments(@"(?i)(?-i:[ab]*)\d", "xAB1 ab2", false, false, 0, -1, "(3,4) (5,8)")]
+    // Not looked through (fuzzy, reverse) or not covered yet (the rest of D168): pinned all the same.
+    [Arguments(@"(?:[ab]*\d){e<=1}", "ab ab1", false, false, 0, -1, "(0,6) (6,6)")]
+    [Arguments(@"(?r)[ab]*\d", "ab ab1", false, true, 0, -1, "(3,6) (0,0)P")]
+    [Arguments(@"[ab]+\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
+    [Arguments(@"[ab]*+\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Arguments(@"[ab]*?\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Property("Upstream", "regex 2026.9.29 finditer, 2026-11-22")]
+    public void A_leading_repeat_skip_behind_the_first_set_check_keeps_every_answer(
+        string source,
+        string subject,
+        bool overlapped,
+        bool partial,
+        int beginning,
+        int length,
+        string expected
+    )
+    {
+        // D168. The skip may only drop starts that cannot match. Each row is regex 2026.9.29's
+        // finditer over the same text (pos and endpos from beginning and length), 2026-11-22,
+        // written as each match's span, P for a partial one, and the group spans after g.
+        var pattern = new FuzzyRegex(source);
+        string answer = string.Join(
+            " ",
+            pattern
+                .Matches(subject, beginning, length, overlapped, partial)
+                .Select(static found =>
+                    $"({found.Index},{found.Index + found.Length}){(found.PartialMatch ? "P" : "")}"
+                    + (found.Groups.Count > 1 ? "g" : "")
+                    + string.Concat(
+                        Enumerable
+                            .Range(1, found.Groups.Count - 1)
+                            .Select(g => $"({found.Groups[g].Index},{found.Groups[g].Index + found.Groups[g].Length})")
+                    )
+                )
+        );
+
+        answer.Should().Be(expected);
+    }
+
+    [Test]
     [Property("Upstream", "regex 2026.9.10, 2026-09-24")]
     public void A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped()
     {

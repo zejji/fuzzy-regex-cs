@@ -2084,7 +2084,10 @@ internal sealed class PatternObject
         // Unbounded repeats only, as .NET's UpdateBumpalong: a bounded one whose run reaches its
         // maximum gets no skip, and the skip's own count would walk the run a third time
         // (`[ab]{0,1000}\d` over "ab" x 15,000: 59,032,001 characters walked without the
-        // look-through, 87,035,002 with it applied there too, Debug, 2026-11-22).
+        // look-through, 87,035,002 with it applied there too, Debug, 2026-11-22). The one-character
+        // test keeps out a zero-width node that has no character to admit, such as Success, whose
+        // Next1 is empty (the empty-pattern pins throw without it). Step == 0 keeps this to the check: a
+        // consuming node in front (option B of the D168 design note) is not taken here.
         bool behindTheCheck = false;
         if (mayLookThroughGroups && node.Step == 0 && NodeQueries.MatchesOneCharacter(node))
         {
