@@ -1271,6 +1271,7 @@ internal static class Matcher
         }
 
         endPos = pos;
+        ChargeTurns(state, count);
 
         // Upstream's 'count == (size_t)(state->text_end - text_pos)' forwards and
         // 'count == (size_t)(text_pos)' backwards: the walk consumed everything there was, which in
@@ -9830,10 +9831,33 @@ internal static class Matcher
     /// characters, because it can read the rest of a subject in one call.
     /// D166 added <see cref="StringSearch"/> and the leading-literal sweeps, which poll once per
     /// <see cref="SweepChunkLength"/> start positions: hostile text makes one sweep cost the
-    /// subject's length times the literal's.
+    /// subject's length times the literal's. D167 added the fuzzy literal filter's piece searches,
+    /// on the same chunks, and <see cref="ChargeTurns"/>, which counts a walk made inside one turn
+    /// against the gate so the next turn polls.
     /// </remarks>
     internal static bool SafeCheckCancel(MatchState state) =>
         state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
+
+    /// <summary>
+    /// <b>NOT UPSTREAM'S (D167).</b> Counts <paramref name="turns"/> turns of work done inside one
+    /// turn of the matching loop against <c>state.Iterations</c>, the 256-turn poll gate of
+    /// <see cref="SafeCheckCancel"/>. When the charge reaches the gate, the counter is left one step
+    /// short of it, so the loop's next turn wraps it to zero and polls.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CountOne"/> charges one turn per character walked: it walks a repeat to the end
+    /// of the slice inside one turn, so without the charge a repeat over 10^7 characters held the
+    /// poll back for 256 such walks, and a 10 ms timeout fired after seconds (ZejPdf, 2026-11-21).
+    /// The poll itself stays at the loop's gates, which already know how to stop. Spec amendment
+    /// 38 item B plans a work budget driven by the same count.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="turns">The work done, in turns; not negative.</param>
+    internal static void ChargeTurns(MatchState state, long turns)
+    {
+        long charged = state.Iterations + (turns << 8);
+        state.Iterations = charged >= 0xFF00 ? (ushort)0xFF00 : (ushort)charged;
+    }
 
     /// <summary>
     /// One codepoint along in the direction the pattern runs: upstream's
@@ -16167,16 +16191,17 @@ internal static class Matcher
         {
             if (fuzzyFilter.Reverse)
             {
-                if (
-                    !fuzzyFilter.MayMatchBefore(
-                        state.Text.Span,
-                        state.SearchSliceStart,
-                        state.TextPos,
-                        state.FilterMemory!
-                    )
-                )
+                // D167: its piece searches poll the budget between chunks, as the forward ones do.
+                int verdict = fuzzyFilter.ReverseVerdict(
+                    state.Text.Span,
+                    state.SearchSliceStart,
+                    state.TextPos,
+                    state.FilterMemory!,
+                    state
+                );
+                if (verdict != FuzzyLiteralFilter.MayMatch)
                 {
-                    return MatchStatus.Failure;
+                    return verdict == FuzzyLiteralFilter.Cancelled ? MatchStatus.Cancelled : MatchStatus.Failure;
                 }
 
                 fuzzyFilter = null;
@@ -16184,7 +16209,8 @@ internal static class Matcher
             else
             {
                 // C3: the filter's bit-parallel scan can read the rest of a long subject in one call,
-                // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk).
+                // so it polls the budget itself at each chunk (FuzzyLiteralFilter.ScanChunk); its
+                // piece searches poll at each SweepChunkLength (D167).
                 int next = fuzzyFilter.NextStart(
                     state.Text.Span,
                     foundPos,
