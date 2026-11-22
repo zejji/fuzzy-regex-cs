@@ -9828,8 +9828,9 @@ internal static class Matcher
     /// <see cref="SearchStart"/>'s retry loop, for the same reason. C3 added the fuzzy-literal scan
     /// (<see cref="FuzzyLiteralFilter"/>), which polls once per <see cref="FuzzyLiteralFilter.ScanChunk"/>
     /// characters, because it can read the rest of a subject in one call.
-    /// <see cref="StringSearch"/> deliberately has no poll - the reasoning, and the measurement
-    /// behind it, are at the sweep itself.
+    /// D166 added <see cref="StringSearch"/> and the leading-literal sweeps, which poll once per
+    /// <see cref="SweepChunkLength"/> start positions: hostile text makes one sweep cost the
+    /// subject's length times the literal's.
     /// </remarks>
     internal static bool SafeCheckCancel(MatchState state) =>
         state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
@@ -14576,6 +14577,14 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// <b>NOT UPSTREAM'S (D166).</b> The shortest stretch of start positions one vectorised literal
+    /// sweep covers between two budget polls. A sweep for a literal of length m covers
+    /// <c>max(SweepChunkLength, 4 * m)</c> start positions, so the overlap of m - 1 code units
+    /// that keeps an occurrence straddling a chunk end visible costs at most a quarter more work.
+    /// </summary>
+    internal const int SweepChunkLength = 65_536;
+
+    /// <summary>
     /// Port of <c>string_search</c> (<c>upstream/src/_regex.c</c> lines 6596-6633): find the
     /// required string, fast where the subject allows it.
     /// </summary>
@@ -14646,33 +14655,32 @@ internal static class Matcher
             return SimpleStringSearch(state, node, textPos, limit, out isPartial, out cancelled);
         }
 
-        // ONE SWEEP, NOT A POLLED ONE, and S60 tried it the other way first. The sweep was cut into
-        // 64 Ki chunks with a cancellation poll between them, on the reasoning that an 'IndexOf' a
-        // caller cannot interrupt is a hole in the promise S51 made. It is not, and the measurement
-        // says why:
-        //
-        //   * Every attempt opens with a poll already. 'MatchState.InitMatch' sets 'Iterations' to 0
-        //     (MatchState.cs:749) and 'basic_match' opens at 'start_match:' with
-        //     'state.Iterations == 0 && SafeCheckCancel(state)' (:5102), so the gate is OPEN on
-        //     every attempt and a spent budget is caught a few instructions before this method runs.
-        //     The chunk poll could therefore only ever fire mid-sweep - a race with the machine, and
-        //     no test can pin it.
-        //   * The stretch it was capping is bounded and small. 'IndexOf' over 100,000,000 code units
-        //     of a subject holding no occurrence took 14.1 ms measured here on 2026-09-20 (Release,
-        //     busy machine), so the largest subject a .NET string can hold sweeps in about 150 ms.
-        //   * The chunking cost something real: chunks have to overlap by 'needle.Length - 1' or an
-        //     occurrence straddling a boundary is missed, which is an off-by-one this method would
-        //     otherwise not own.
-        //
-        // 'SimpleStringSearch' keeps its poll, because it is a character-at-a-time loop with
-        // iterations to count and no vectorised floor under it.
-        // The chunk loop this replaced ran zero times when the bounds crossed; 'AsSpan' would throw.
+        // A POLLED SWEEP (D166, 2026-11-21), reversing S60's single sweep. S60 measured 14.1 ms
+        // over 10^8 code units holding no candidate, but hostile text costs the subject's length
+        // times the needle's: 'ab' x 1999 + 'cb' over 'ab' x 5x10^6 took about 0.3 s with no way
+        // to stop it. So the sweep runs in chunks of start positions (see SweepChunkLength), each
+        // overlapping the next by needle.Length - 1 so an occurrence straddling a chunk end is
+        // still seen whole, with a poll before every chunk but the first: the attempt's own poll at
+        // 'start_match' has just covered the first. Chunks are searched in order and each finds
+        // its earliest occurrence, so the first hit is the sweep's earliest.
         if (limit > textPos)
         {
-            int found = state.Text.Span[textPos..limit].IndexOf(needle.AsSpan());
-            if (found >= 0)
+            ReadOnlySpan<char> text = state.Text.Span;
+            int chunk = Math.Max(SweepChunkLength, 4 * needle.Length);
+            for (int start = textPos; start < limit; start = (int)Math.Min(limit, (long)start + chunk))
             {
-                return textPos + found;
+                if (start > textPos && SafeCheckCancel(state))
+                {
+                    cancelled = true;
+                    return -1;
+                }
+
+                int end = (int)Math.Min(limit, (long)start + chunk + needle.Length - 1);
+                int found = text[start..end].IndexOf(needle.AsSpan());
+                if (found >= 0)
+                {
+                    return start + found;
+                }
             }
         }
 
@@ -15626,8 +15634,48 @@ internal static class Matcher
         return true;
     }
 
-    /// <summary>What <see cref="NextLeadingStringPastOutliers"/> answers when the timeout or the token stops it.</summary>
-    private const int _outlierSearchCancelled = -2;
+    /// <summary>
+    /// What <see cref="NextLeadingStringPastOutliers"/> and <see cref="SweepLeadingStrings"/> answer when
+    /// the timeout or the token stops them.
+    /// </summary>
+    private const int _sweepCancelled = -2;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D166): the earliest of the pattern's leading literals that starts and ends
+    /// in <c>[from, to)</c>, swept in chunks of <see cref="SweepChunkLength"/> start positions (or
+    /// four literal lengths) with a budget poll before every chunk but the first. Each chunk reads
+    /// <c>LeadingStringsMaxLength</c> - 1 units past its last start, so a literal straddling a chunk
+    /// end is still seen whole. See <see cref="StringSearch"/> for why the sweep is cut up.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="from">Where the search starts.</param>
+    /// <param name="to">Where the text searched ends.</param>
+    /// <returns>
+    /// How far past <paramref name="from"/> the literal starts, -1 if none does, or
+    /// <see cref="_sweepCancelled"/> when the timeout or the token stopped the search.
+    /// </returns>
+    private static int SweepLeadingStrings(MatchState state, int from, int to)
+    {
+        PatternObject pattern = state.Pattern;
+        ReadOnlySpan<char> text = state.Text.Span;
+        int chunk = Math.Max(SweepChunkLength, 4 * pattern.LeadingStringsMaxLength);
+        for (int start = from; start < to; start = (int)Math.Min(to, (long)start + chunk))
+        {
+            if (start > from && SafeCheckCancel(state))
+            {
+                return _sweepCancelled;
+            }
+
+            int end = (int)Math.Min(to, (long)start + chunk + pattern.LeadingStringsMaxLength - 1);
+            int at = text[start..end].IndexOfAny(pattern.LeadingStrings!);
+            if (at >= 0)
+            {
+                return start - from + at;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S (C6 option B3): the next start <c>PatternObject.LeadingStrings</c> admits when
@@ -15651,7 +15699,7 @@ internal static class Matcher
     /// <param name="foundPos">Where the next attempt would start, at most the slice end.</param>
     /// <returns>
     /// How far past <paramref name="foundPos"/> the next start is, -1 if there is none, or
-    /// <see cref="_outlierSearchCancelled"/> when the timeout or the token stopped the search.
+    /// <see cref="_sweepCancelled"/> when the timeout or the token stopped the search.
     /// </returns>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int NextLeadingStringPastOutliers(MatchState state, PatternObject pattern, int foundPos)
@@ -15672,7 +15720,7 @@ internal static class Matcher
             state.Iterations = (ushort)(state.Iterations + 0x100);
             if (state.Iterations == 0 && SafeCheckCancel(state))
             {
-                return _outlierSearchCancelled;
+                return _sweepCancelled;
             }
 
             if (pos < state.LeadingOutlierFrom || pos > state.LeadingOutlierAt)
@@ -15706,7 +15754,11 @@ internal static class Matcher
             if (pos < windowStart)
             {
                 int end = Math.Min(outlier, text.Length);
-                int at = text[pos..end].IndexOfAny(pattern.LeadingStrings!);
+                int at = SweepLeadingStrings(state, pos, end);
+                if (at == _sweepCancelled)
+                {
+                    return at;
+                }
 
                 // A hit inside the window may come after a match the search missed there.
                 if (at >= 0 && pos + at < windowStart)
@@ -16201,9 +16253,9 @@ internal static class Matcher
         if (leadingStrings is not null && foundPos <= state.SearchSliceEnd)
         {
             int at = pattern.LeadingOutliers is null
-                ? state.Text.Span[foundPos..state.SearchSliceEnd].IndexOfAny(leadingStrings)
+                ? SweepLeadingStrings(state, foundPos, state.SearchSliceEnd)
                 : NextLeadingStringPastOutliers(state, pattern, foundPos);
-            if (at == _outlierSearchCancelled)
+            if (at == _sweepCancelled)
             {
                 return MatchStatus.Cancelled;
             }

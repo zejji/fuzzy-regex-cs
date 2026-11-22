@@ -897,9 +897,9 @@ internal sealed class PatternObject
     internal SearchValues<char>? LeadingOutliers;
 
     /// <summary>
-    /// The longest of the <see cref="LeadingStrings"/> in code units, set with
-    /// <see cref="LeadingOutliers"/>: a match holding an outlier starts at most this many units less
-    /// one before it.
+    /// The longest of the <see cref="LeadingStrings"/> in code units, set with them: a match holding
+    /// one of the <see cref="LeadingOutliers"/> starts at most this many units less one before it,
+    /// and the chunks of a polled sweep for the strings overlap by one less (D166).
     /// </summary>
     internal int LeadingStringsMaxLength;
 
@@ -1872,7 +1872,7 @@ internal sealed class PatternObject
                 null,
                 null,
                 null,
-                0
+                LongestHead()
             );
         }
 
@@ -1909,13 +1909,14 @@ internal sealed class PatternObject
                 null,
                 SearchValues.Create([.. units]),
                 outliers.Count == 0 ? null : SearchValues.Create([.. outliers]),
-                outliers.Count == 0
-                    ? 0
-                    : heads.Max(static head => head.Values.Sum(static c => c > char.MaxValue ? 2 : 1))
+                LongestHead()
             );
         }
 
         return (null, SearchValues.Create([.. units]), null, null, 0);
+
+        // The longest literal in UTF-16 code units: a sweep's chunks overlap by one less (D166).
+        int LongestHead() => heads.Max(static head => head.Values.Sum(static c => c > char.MaxValue ? 2 : 1));
 
         bool Collect(Node? node)
         {
