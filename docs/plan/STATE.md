@@ -62,10 +62,9 @@ measurement, WPR profiles and benchmarks.
   `python .scratch/d167/register.py <merge hash>` (writes F157); STATE item 16: D167 merged, timing retake owed.
 - D163 D11 part in `.claude/worktrees/d163` (branch `perf/d163-d11-nodes` 9e8dc5de, committed): ratchet GREEN 10,398,
   oracle only D171, bytes in the D163 row. Left: merge (inspections at >= 12 GB free); BDN time on a quiet evening.
-- D170, D171 judging in `.claude/worktrees/judge-d170` (branch `test/judge-d170-d171` from main 8126cf9b): Python and
-  port probes say port right on both (D170 ledger 11 A, finditer leak; D171 ledger 83, `(?e)` + `\K`); blind review
-  did not refute. Oracle for seeds 20261121/22 running (`.scratch/judge-d170/rows.log`), then judge-row pins (F159, F160;
-  F158 left for D163), ratchet, oracle 3 seeds.
+- D170, D171 judged port right on `test/judge-d170-d171` 17691546 (worktree `.claude/worktrees/judge-d170`): F159
+  (ledger 11 A, finditer leak), F160 (ledger 83, `(?e)` + `\K`); blind review did not refute; F158 left for D163.
+  Gates GREEN: ratchet 10,397; oracle seeds 7, 4242, 20261121, 20261122 diverge 0 (`.scratch/judge-d170/`). Left: merge.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
