@@ -392,6 +392,72 @@ public sealed class OptimiserTrapsTests
     }
 
     [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"[ab]*\d", "abab ab9", 5, 3)]
+    [Arguments(@"([ab]*)\d", "abab ab9", 5, 3)]
+    [Arguments(@"[ab]*\d", "5ab", 0, 1)]
+    [Property("Upstream", "regex 2026.9.29, the answers only; upstream is quadratic here (D168)")]
+    public void A_leading_repeat_behind_the_first_set_check_is_skipped_like_a_bare_one(
+        string source,
+        string probe,
+        int index,
+        int length
+    )
+    {
+        // D168. A pattern that does not start simply gets a zero-width first-set check compiled in
+        // front of it (_regex_core.py _compile_firstset, prepended in _main.py), and that check is
+        // the start node. Upstream's FAILURE arm skips a run only when the start node itself is the
+        // repeat (:15705), so for `[ab]*\d` the skip never fires and every start inside the run
+        // walks the rest of it: 100,030,001 characters walked at 10,000 characters of "ab"
+        // (Debug, 2026-11-22). regex 2026.9.29 measured 1,132 ms at 10,000 and 8,561 ms at 30,000.
+        // The check is a test, not a step, so the starts inside the run reach the same end
+        // positions the failed attempt tried; the walk is then a few passes of the subject.
+        // `[ab]+\d` is still quadratic: its compiled form starts with a one-character [ab] in front
+        // of the repeat, which this look-through does not cover (the rest of D168).
+        var pattern = new FuzzyRegex(source, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = string.Concat(Enumerable.Repeat("ab", 5_000));
+
+        EngineWork.ShouldWalkAtMostCharacters(
+            () => pattern.IsMatch(subject).Should().BeFalse(),
+            maxCharacters: 4 * subject.Length,
+            because: "the failed attempt's run is skipped, not walked again from every start inside it"
+        );
+
+        // The answers are regex 2026.9.29's search over the probe, 2026-11-22.
+        Match match = pattern.Match(probe);
+        (match.Success, match.Index, match.Length).Should().Be((true, index, length));
+    }
+
+    [Test]
+    [Category(EngineWork.Category)]
+    public void A_bounded_leading_repeat_behind_the_first_set_check_gets_no_skip()
+    {
+        // D168. Where a bounded repeat's run reaches its maximum the skip does not fire, so its
+        // count would be a third walk of the run on top of the attempt's two. 2,000,201 characters
+        // walked here without the look-through (Debug, 2026-11-22), about 3,000,000 with it.
+        var pattern = new FuzzyRegex(@"[ab]{0,100}\d", FuzzyRegexOptions.None, EngineWork.HangGuard);
+        string subject = string.Concat(Enumerable.Repeat("ab", 5_000));
+
+        EngineWork.ShouldWalkAtMostCharacters(
+            () => pattern.IsMatch(subject).Should().BeFalse(),
+            maxCharacters: 2_200_000,
+            because: "a bounded repeat behind the first-set check keeps upstream's attempts and no extra count"
+        );
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.29, 2026-11-22")]
+    public void A_search_skipping_leading_runs_behind_the_first_set_check_finds_every_match()
+    {
+        // D168: Python's finditer over the same text gives (0, 3), (7, 10), (10, 11).
+        new FuzzyRegex(@"[ab]*\d")
+            .Matches("ab1 aa ba22b")
+            .Select(static found => (found.Index, found.Length))
+            .Should()
+            .Equal((0, 3), (7, 3), (10, 1));
+    }
+
+    [Test]
     [Property("Upstream", "regex 2026.9.10, 2026-09-24")]
     public void A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped()
     {

@@ -2051,6 +2051,12 @@ internal sealed class PatternObject
     /// 8,000 characters, 2026-09-23) and linear without the group. Pinned by
     /// <c>OptimiserTrapsTests.A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one</c>.
     /// </para>
+    /// <para>
+    /// sync-divergence (D168): it also looks through the zero-width first-set check that a
+    /// pattern which does not start simply begins with, which upstream's test of the start node
+    /// never does; see the body. Pinned by
+    /// <c>OptimiserTrapsTests.A_leading_repeat_behind_the_first_set_check_is_skipped_like_a_bare_one</c>.
+    /// </para>
     /// </remarks>
     /// <param name="pattern">The compiled pattern.</param>
     /// <returns>The leading repeat, or <see langword="null"/>.</returns>
@@ -2068,12 +2074,32 @@ internal sealed class PatternObject
             && pattern.CallRefInfoList.Count == 0
             && !pattern.GroupInfoList.Exists(static group => group.Referenced);
 
+        // NOT UPSTREAM (D168): look through the first-set check too. A pattern that does not start
+        // simply gets a zero-width one-character test compiled in front of it (_regex_core.py
+        // _compile_firstset, the only producer of a ZEROWIDTH_OP node, prepended in _main.py), and
+        // upstream's switch on 'start_node' then never meets the repeat, so `[ab]*\d` over a run
+        // with no digit walks the rest of the run from every start in it. The check takes no
+        // character and passes wherever the repeat can take one, so the attempts it lets through
+        // are the ones the argument above covers. The same guards as the groups, kept as caution.
+        // Unbounded repeats only, as .NET's UpdateBumpalong: a bounded one whose run reaches its
+        // maximum gets no skip, and the skip's own count would walk the run a third time
+        // (`[ab]{0,1000}\d` over "ab" x 15,000: 59,032,001 characters walked without the
+        // look-through, 87,035,002 with it applied there too, Debug, 2026-11-22).
+        bool behindTheCheck = false;
+        if (mayLookThroughGroups && node.Step == 0 && NodeQueries.MatchesOneCharacter(node))
+        {
+            node = node.Next1.Node!;
+            behindTheCheck = true;
+        }
+
         while (mayLookThroughGroups && node.Op == Opcode.StartGroup)
         {
             node = node.Next1.Node!;
         }
 
-        return node.Op == Opcode.GreedyRepeatOne ? node : null;
+        return node.Op == Opcode.GreedyRepeatOne && (!behindTheCheck || node.Values[2] >= RegexFlags.Unlimited)
+            ? node
+            : null;
     }
 
     /// <summary>
