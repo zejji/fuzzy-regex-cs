@@ -1,13 +1,18 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-# The IDE inspections' merge gate (owner, DECISIONS 2026-11-21). Branch commits may skip them
-# (FUZZY_WIP_SKIP_INSPECTIONS in .husky/pre-commit), so the merge into main is where they must
-# pass. Runs only for a merge into main that brings in a .cs change. A fast-forward merge runs no
-# hook at all, which is why merges into main are --no-ff (STATE.md rules); a merge that stops on a
-# conflict is finished by `git commit`, where pre-commit refuses the skip on main and inspects.
+# The IDE inspections on a merge into main that brings in a .cs change (owner, DECISIONS 2026-11-21
+# and 2026-11-22). A batch of merges may skip them with FUZZY_WIP_SKIP_INSPECTIONS=1, as any
+# intermediate commit may (.husky/pre-commit), provided main is inspected when the work finishes.
+# A fast-forward merge runs no hook at all, which is why merges into main are --no-ff.
 
 [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || exit 0
+# One merge of a batch may skip them (owner, DECISIONS 2026-11-22); the run when work finishes
+# covers the batch, and .husky/pre-push checks that it happened.
+if [ "${FUZZY_WIP_SKIP_INSPECTIONS:-}" = "1" ]; then
+  echo "pre-merge-commit: IDE inspections SKIPPED (batch merge); inspect main when the work finishes."
+  exit 0
+fi
 changed=$(git diff --cached --name-only HEAD -- '*.cs')
 [ -z "$changed" ] && exit 0
 

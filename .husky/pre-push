@@ -7,4 +7,21 @@ sh "$(dirname "$0")/check-identity.sh" push || exit 1
 # The last moment before work leaves the machine, and far rarer than a commit, so waiting for
 # the suite here is proportionate. CI remains the real gate: a local hook is absent in a fresh
 # clone until `dotnet husky install` runs, and is one --no-verify away from being skipped.
+# The code must have been inspected when work finished (owner, DECISIONS 2026-11-22). Instant: some
+# GREEN run of tools/check-inspections.ps1 must have covered a commit whose .cs files are identical
+# to HEAD's, so docs-only commits after the inspection still pass.
+record="$(git rev-parse --path-format=absolute --git-common-dir)/fuzzy-inspected-commits"
+inspected=""
+if [ -f "$record" ]; then
+  for sha in $(tail -n 50 "$record" | tr -d ''); do
+    if git cat-file -e "$sha^{commit}" 2>/dev/null && git diff --quiet "$sha" HEAD -- '*.cs'; then
+      inspected="$sha"; break
+    fi
+  done
+fi
+if [ -z "$inspected" ]; then
+  echo "pre-push: HEAD's .cs files have no GREEN inspection. Run 'pwsh -File tools/check-inspections.ps1' on HEAD, fix every finding, commit, push again."
+  exit 1
+fi
+
 pwsh -NoProfile -File tools/check-ratchet.ps1

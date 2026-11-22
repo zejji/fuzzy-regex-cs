@@ -65,6 +65,11 @@ A checkpoint also commits work in progress on its branch (a `WIP` commit is fine
 STATE.md on main too. Work that cannot be committed yet is listed under "In flight" with its
 worktree path.
 
+**When work finishes** (before ending a session, handing back to the owner, or a push): run
+`pwsh -File tools/check-inspections.ps1` on main's tip, fix every finding, commit. Intermediate commits
+and batch merges may skip the inspection (`FUZZY_WIP_SKIP_INSPECTIONS=1`); `.husky/pre-push` refuses
+a HEAD whose `.cs` files no GREEN run covered (owner, DECISIONS 2026-11-22).
+
 **Never** keep status only in a chat reply, a session brief, scratch notes or memory. If it is
 not in STATE.md, the next session does not know it.
 

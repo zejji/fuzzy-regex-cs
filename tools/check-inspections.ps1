@@ -49,6 +49,13 @@ $issues = @($report.SelectNodes('//Issue') | Where-Object {
 
 if ($issues.Count -eq 0) {
     Write-Host "Inspections: GREEN (no findings at $Severity or above)" -ForegroundColor Green
+    # Record the commit this run covered, for the pre-push check (owner, DECISIONS 2026-11-22: the
+    # code is inspected whenever work finishes). Only when no .cs file differs from HEAD, so the
+    # record names exactly what was inspected. Kept in the shared git dir, so every worktree sees it.
+    if (-not (git status --porcelain -- '*.cs')) {
+        $record = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'fuzzy-inspected-commits'
+        Add-Content -LiteralPath $record -Value (git rev-parse HEAD)
+    }
     exit 0
 }
 
