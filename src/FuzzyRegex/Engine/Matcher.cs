@@ -4209,6 +4209,14 @@ internal static class Matcher
             "D79: only BESTMATCH and ENHANCEMATCH move the search anchor off the operation start"
         );
 
+        // D116 option G: the BESTMATCH walk memo (BestWalkKnownToFail) relies on '\G' holding at
+        // or before the search's own start in the scan's direction, so that an attempt past that
+        // start meets it only through a body that runs against the scan.
+        Debug.Assert(
+            state.Reverse ? state.OperationStart >= state.SearchAnchor : state.OperationStart <= state.SearchAnchor,
+            "D116: the operation starts at or before every search it runs"
+        );
+
         return state.Pattern.AnchorsBackslashGAtEveryCandidate ? state.SearchAnchor : state.OperationStart;
     }
 
@@ -4250,8 +4258,7 @@ internal static class Matcher
             (state.Pattern.Flags & RegexFlags.BestMatch) == 0
                 || state.TextPos != state.SearchAnchor
                 || state.AttemptStart == state.SearchAnchor
-                || state.Pattern.LooksBackAtTheAnchor
-                || state.Pattern.ReadsTheSearchAnchor,
+                || state.Pattern.LooksBackAtTheAnchor,
             "D116: a fuzzy item meets the search anchor only on the attempt that starts there, or inside a body that can reach it"
         );
 
@@ -27262,7 +27269,15 @@ internal static class Matcher
     /// one with it.
     /// </para>
     /// <para>
-    /// What does not carry over is not remembered: a <c>\G</c>, which reads the anchor; a
+    /// A <c>\G</c> holds where the matching operation began (<see cref="BackslashGPosition"/>),
+    /// at or before both searches' starts in the scan's direction (asserted there), so an attempt
+    /// past S meets it only through a body against the scan, which withholds the memo (D116
+    /// option G). Its position can still differ between the two searches when the fact comes from
+    /// an earlier finditer step, and then the attempt at S itself can differ even when S is F: a
+    /// fact at the same start then runs that attempt (<see cref="PatternObject.ReadsTheSearchAnchor"/>).
+    /// </para>
+    /// <para>
+    /// What does not carry over is not remembered: a
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c>, which cut a search short (D109 refuses them in a fuzzy
     /// pattern anyway); a partial search, which can succeed at the slice's end; and a different
     /// slice, since a lookaround reads up to its edges.
@@ -27277,7 +27292,7 @@ internal static class Matcher
     /// <see cref="AnchorIsPinned"/>, which only they call and which asserts the premise; the
     /// empty-match ban at <see cref="Opcode.Success"/> in <see cref="BasicMatchCore"/> (three
     /// places), which compares a match's end, never inside a lookaround; and <c>\G</c>
-    /// (<see cref="BackslashGPosition"/>), excluded by <see cref="PatternObject.ReadsTheSearchAnchor"/>.
+    /// (<see cref="BackslashGPosition"/>), as above.
     /// <see cref="MatchState.AttemptStart"/> and <see cref="MatchState.MatchPos"/> are the attempt's
     /// own start, not the search's.
     /// </para>
@@ -27308,14 +27323,17 @@ internal static class Matcher
                 continue;
             }
 
-            if (start == fact.From)
+            // D116 option G: with a \G the fact's search may have begun its operation somewhere
+            // else (an earlier finditer step), so \G can hold at this start now and not then. Only
+            // the first attempt differs, so it is run.
+            if (start == fact.From && !state.Pattern.ReadsTheSearchAnchor)
             {
                 if (!fact.MustAdvance || state.MustAdvance)
                 {
                     return _walkSearchFails;
                 }
             }
-            else if (state.Reverse ? start < fact.From : start > fact.From)
+            else if (start == fact.From || (state.Reverse ? start < fact.From : start > fact.From))
             {
                 found = _walkSearchFirstAttemptOnly;
             }
@@ -27387,7 +27405,6 @@ internal static class Matcher
         );
 
         return state.PartialSide == MatchState.PartialNone
-            && !state.Pattern.ReadsTheSearchAnchor
             && !state.Pattern.HasBacktrackingVerb
             && !state.Pattern.LooksBackAtTheAnchor;
     }

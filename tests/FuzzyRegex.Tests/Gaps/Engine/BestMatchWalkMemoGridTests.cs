@@ -13,7 +13,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// Random <c>(?b)</c> and <c>(?br)</c> patterns over short texts of <c>' abx'</c>, from the
 /// generator of the D116 design note (<c>docs/plan/2026-11-16-d116-bestmatch-lookbehind-design.md</c>,
 /// section 3): the lookaround outside the fuzzy section, inside it as a plain lookaround, and
-/// inside it as a conditional's test. Each row runs twice, as compiled and with
+/// inside it as a conditional's test. Mode <c>anchor</c> (D116 option G) puts a <c>\G</c> in
+/// place of the lookaround, anywhere but in a body against the scan, outside or inside the fuzzy
+/// section; main withheld the memo from every pattern with a <c>\G</c>. Each row runs twice, as compiled and with
 /// <see cref="PatternObject.LooksBackAtTheAnchor"/> forced on, and the answers must agree.
 /// </para>
 /// <para>
@@ -29,6 +31,7 @@ public sealed class BestMatchWalkMemoGridTests
     [Arguments("outside", 4_000)]
     [Arguments("insideplain", 4_000)]
     [Arguments("insidecond", 4_000)]
+    [Arguments("anchor", 4_000)]
     public void An_exact_lookaround_against_the_scan_keeps_the_walk_memo_without_moving_an_answer(string mode, int rows)
     {
 #pragma warning disable CA5394, S2245 // A seeded sequence, so a failure replays; nothing here is a secret.
@@ -36,6 +39,7 @@ public sealed class BestMatchWalkMemoGridTests
         bool inside = mode.StartsWith("inside", StringComparison.Ordinal);
         bool plainOnly = string.Equals(mode, "insideplain", StringComparison.Ordinal);
         bool condOnly = string.Equals(mode, "insidecond", StringComparison.Ordinal);
+        bool anchor = string.Equals(mode, "anchor", StringComparison.Ordinal);
         bool reversed = false;
 
         string Pick(params string[] choices) => choices[rng.Next(choices.Length)];
@@ -44,6 +48,14 @@ public sealed class BestMatchWalkMemoGridTests
         string Fuzz() => Pick("{e<=1}", "{i<=1}", "{s<=1}", "{d<=1}", "{i<=1,d<=1}", "{e<=2}");
         string Look()
         {
+            if (anchor)
+            {
+                // Option G: a \G anywhere but in a body against the scan, as in the option G grid.
+                return reversed
+                    ? Pick(@"\G", @"\G?", @"(?:\G|x)", @"(?=\G)", @"(?<=\G.?)", @"(?(?<=\G)a|b)", @"(?<!\G)")
+                    : Pick(@"\G", @"\G?", @"(?:\G|x)", @"(?<!x)\G", @"(?=a?\G)", @"(?!\G)", @"(?(?=\G)a|b)");
+            }
+
             string body = Seq(rng.Next(1, 3));
             string against = reversed ? Pick("(?=", "(?!") : Pick("(?<=", "(?<!");
             return condOnly || (!plainOnly && rng.Next(4) == 0)
@@ -59,20 +71,21 @@ public sealed class BestMatchWalkMemoGridTests
             string flags = reversed ? "(?br)" : "(?b)";
             string fuzzy = Seq(rng.Next(1, 4));
             string look = Look();
-            string pattern = inside
-                ? flags
-                    + Pick(
-                        $"(?:{look}{fuzzy}){Fuzz()}",
-                        $"(?:{fuzzy}{look}|{Seq(1)}){Fuzz()}",
-                        $"(?:{fuzzy}{look}{Seq(1)}){Fuzz()}"
-                    )
-                : flags
-                    + Pick(
-                        $"{look}(?:{fuzzy}){Fuzz()}",
-                        $"(?:{fuzzy}){Fuzz()}{look}",
-                        $"(?:{fuzzy}){Fuzz()}{look}{Seq(1)}",
-                        $"(?:{fuzzy}){Fuzz()}|{look}{Seq(1)}"
-                    );
+            string pattern =
+                inside || (anchor && rng.Next(2) == 0)
+                    ? flags
+                        + Pick(
+                            $"(?:{look}{fuzzy}){Fuzz()}",
+                            $"(?:{fuzzy}{look}|{Seq(1)}){Fuzz()}",
+                            $"(?:{fuzzy}{look}{Seq(1)}){Fuzz()}"
+                        )
+                    : flags
+                        + Pick(
+                            $"{look}(?:{fuzzy}){Fuzz()}",
+                            $"(?:{fuzzy}){Fuzz()}{look}",
+                            $"(?:{fuzzy}){Fuzz()}{look}{Seq(1)}",
+                            $"(?:{fuzzy}){Fuzz()}|{look}{Seq(1)}"
+                        );
             string text = new([.. Enumerable.Range(0, rng.Next(3, 14)).Select(_ => " abxab"[rng.Next(6)])]);
 
             (string asCompiled, long compiledSteps) = Run(pattern, text, withhold: false);
