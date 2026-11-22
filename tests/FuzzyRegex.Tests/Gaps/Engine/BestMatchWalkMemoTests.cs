@@ -218,7 +218,8 @@ public sealed class BestMatchWalkMemoTests
     // D116 option G: a \G outside every body against the scan never holds on an attempt the memo
     // skips, so it no longer withholds the memo. Text from the 2026-11-22 options note, where
     // matches touch and \G holds often. Debug steps at 4,000 characters, main ea8148f6 (first row
-    // first): STEPS_MAIN; with the change STEPS_BRANCH. Answers are checked against the memo
+    // first): 9,305,596 / 7,199,766 / 4,939,075; with the change 77,373 / 68,773 / 92,114, and
+    // linear (309,449 / 275,219 / 368,582 at 16,000). Answers are checked against the memo
     // withheld, which is how main runs every pattern with a \G.
     [Test]
     [Category(EngineWork.Category)]
