@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-21 22:57 (machine clock) by Claude Code builder (D166 gates GREEN, merge waiting for 14 GB free).
+**Updated:** 2026-11-22 00:12 (machine clock) by Claude Code builder (D166 gates GREEN; merge BLOCKED on RAM: free 11.8-13.6 GB since 22:55, rule needs 14).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -49,9 +49,12 @@ measurement, WPR profiles and benchmarks.
   SETTLED twice (A-A spread 0.26-2.5x, `summary-1.txt`, `summary-2.txt`): retake on a quiet machine.
   Branch 2a9bdb9c (main merged in): ratchet GREEN 10,422; oracle 3 seeds only row 3862 (D170), block identical to
   the judge-d160 run. 10 ms timeout, hostile rows: main ran 68-642 ms and answered false, fix threw at 14-64 ms
-  (`.scratch/d166/budget-*.txt`). Left: register row, merge at 14 GB under commit.lock.
+  (`.scratch/d166/budget-*.txt`). Register row written (D166, fixed on branch). BLOCKED: the merge into main
+  needs 14 GB free; free RAM stayed 11.8-13.6 GB from 22:55 to 00:15 (peer session). Then: `git merge --no-ff
+  fix/d166-chunked-sweeps` on main under commit.lock; move the row to Completed with `python .scratch/d166/register.py
+  <merge hash>` (writes F156); item 16 row: D166 merged.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
 
-**Next action:** (1) D166: finish gates (ratchet after merging main, oracle 3 seeds), KNOWN-DEFECTS row, merge at 14 GB under commit.lock; timing retake on a quiet machine (morning); (2) D167; (3) D163.
+**Next action:** (1) D166: merge into main once free RAM >= 14 GB (gates GREEN, see In flight), then register F156 and STATE item 16; timing retake on a quiet machine (morning); (2) D167; (3) D163.
