@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 05:45 by Claude Code (overnight: seven branches gated GREEN, merges waiting for RAM).
+**Updated:** 2026-11-22 by Claude Code (seven branches merged to main, not pushed).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,8 +19,8 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster); fewer-keys option E researched 2026-11-22: X1 linear but judged-wrong grid rows, not built, options F/G/H in the D71 row (recommended H); D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); D163: D11 part fixed on `perf/d163-d11-nodes` 9e8dc5de (840 B a compile, gates green), merge waits for RAM; left: Teddy and ASCII tables lazy + size gate, needs a quiet timing window; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); D116 was already fixed 2026-11-16 (F148); its remainder is measured in `2026-11-22-d116-options.md`: recommends option G (`\G` patterns, small, compile time) after D167 and D163; fuzzy lookbehind bodies (A) and recursive calls (C) stay as the ceiling. Option G built on `perf/d116g-anchor-memo` 7660a4ab (worktree `d116g`, from main; D167/D163 overlap only in STATUS.md and the stamp), gates GREEN 2026-11-22 (ratchet 10,406; oracle only D171 row 3857, identical on main; 0 B per call; blind review clean; F148 row); adds a same-start rule the note missed: merge after D167 and D163 |
-| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note written (`2026-11-22-work-budget-design.md`), owner to choose API from note; D168: mechanism found (`2026-11-22-d168-quadratic-leading-repeat.md`), option A on `perf/d168-skip-through-firstset` a41ef3f2 (on the D167 branch), gates GREEN 2026-11-22 (ratchet 10,479; oracle: only D171 row 3857, identical on main; differential, blind review, allocation, WPR: D168 row): merge after D167; options B, C, D on `perf/d168-followups` 1ac4ed3a (stacked on A, worktree `d168b`), gates GREEN 2026-11-22 (ratchet 10,516; oracle only D171; differential 0 changed of 180,000; 0 B; blind review: D168 row): merge after A; D169: WPR profile first |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster); fewer-keys option E researched 2026-11-22: X1 linear but judged-wrong grid rows, not built, options F/G/H in the D71 row (recommended H); D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); D163: D11 part merged to main 57e674fd 2026-11-22 (840 B a compile); left: Teddy and ASCII tables lazy + size gate, needs a quiet timing window; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); D116 was already fixed 2026-11-16 (F148); its remainder is measured in `2026-11-22-d116-options.md`: recommends option G (`\G` patterns, small, compile time) after D167 and D163; fuzzy lookbehind bodies (A) and recursive calls (C) stay as the ceiling. Option G (`perf/d116g-anchor-memo` 7660a4ab, gates GREEN, F148 row) merged to main efc9771f 2026-11-22; left: quiet-machine timing for D163 and D116g |
+| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | D166 merged to main 227dcc16 (F156), D167 merged c31bf0c8 (F157), D168 options A merged bcc8a64e and B/C/D merged f78fd9eb (2026-11-22, not pushed); D169 open | A, C: quiet-machine timing retake for D166, D167; B: design note written (`2026-11-22-work-budget-design.md`), owner to choose API from note; D168: mechanism found (`2026-11-22-d168-quadratic-leading-repeat.md`), options A-D merged (gates in the D168 row), quiet-machine timing left; D169: WPR profile first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -28,7 +28,7 @@ measurement, WPR profiles and benchmarks.
 ## Rules
 
 - WIP commits off main: `FUZZY_WIP_SKIP_INSPECTIONS=1` (no inspection). Merges into main: `--no-ff`; the
-  pre-merge-commit inspection runs under the `.scratch/s1024/commit.lock` mutex at 14 GB free (~10 GB, peer priority);
+  pre-merge-commit inspection runs under the `.scratch/s1024/commit.lock` mutex at 11 GB free (~10 GB, peer priority; owner 2026-11-22);
   start `.scratch/s1024/watchdog.ps1` and `jbguard.ps1` before builds.
 - Timing only on a quiet machine, LibreHardwareMonitor running, peer sessions told first.
 - Every perf change: WPR profile before/after, differential against main, oracle, allocation check,
@@ -38,43 +38,19 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
+- Merged to main 2026-11-22, not pushed: D166 227dcc16 (+F156 cdc9300a), D167 c31bf0c8 (+F157 827fc7ae), D163 D11 part
+  57e674fd, judge D170/D171 804ccc9c (F159, F160), D168 A bcc8a64e, D168 B/C/D f78fd9eb, D116g efc9771f. Ratchet on
+  main: GREEN 10,526 on efc9771f (baseline unchanged). Worktrees kept: d166, d167, d163, judge-d170, d168b, d116g.
 - D71 option E experiment: `.claude/worktrees/d71b` (branch `perf/d71-next`, uncommitted, patch `.scratch/d71b/option-e.patch`). Unsound (D71 row); delete the worktree once option F or H is decided.
-- CI GREEN on 40f09940 (run 44948175075, 2026-11-21).
-- judge-row D160 tooling fix merged to main 2a4c5d6b (branch 895c07c8; recorded on F150), not pushed.
-- D166 (item 16 A) in `.claude/worktrees/d166` (branch `fix/d166-chunked-sweeps`, WIP 4ac2d751, main merged in). `StringSearch` and both leading-literal sweeps (`SweepLeadingStrings`) poll per `SweepChunkLength`
-  (64 Ki, or 4m) start positions, overlap m - 1. `Gaps/Api/PrefixSweepPollTests.cs` (25 tests, red/green and mutation
-  proven). `OptimiserTrapsTests.An_alternation_of_literals...` made `[NotInParallel]`: its 25 ms budget is now
-  observed inside the sweep and failed once in the full suite (passed 3/3 alone). Ratchet GREEN 10,422 (pre-merge).
-  Perf (`.scratch/d166/perf.cs`, Release, worktree `d166-main`): answers identical on 29 rows; 0 B per call on main
-  and fix; WPR (`.scratch/d166/prof-*.txt`): IndexOf 39.3% main vs 39.0% fix, no new frame; A-B-B-A timing NOT
-  SETTLED twice (A-A spread 0.26-2.5x, `summary-1.txt`, `summary-2.txt`): retake on a quiet machine.
-  Branch 2a9bdb9c (main merged in): ratchet GREEN 10,422; oracle 3 seeds only row 3862 (D170), block identical to
-  the judge-d160 run. 10 ms timeout, hostile rows: main ran 68-642 ms and answered false, fix threw at 14-64 ms
-  (`.scratch/d166/budget-*.txt`). Register row written (D166, fixed on branch). BLOCKED: the merge into main
-  needs 14 GB free; free RAM stayed 11.8-13.6 GB from 22:55 to 00:15 (peer session). Then: `git merge --no-ff
-  fix/d166-chunked-sweeps` on main under commit.lock; move the row to Completed with `python .scratch/d166/register.py
-  <merge hash>` (writes F156); item 16 row: D166 merged.
-- D167 (item 16 C) in `.claude/worktrees/d167` (branch `fix/d167-charged-walks` e331a095, from the D166 branch).
-  `CountOne` charges its walk to the 256-turn gate (`Matcher.ChargeTurns`); the filter's piece searches poll in D166's
-  chunks. Gates GREEN: `WalkPollTests` (25, red/green and mutation proven), ratchet GREEN 10,447, oracle 3 seeds only
-  row 3857 (new D171, same answer on main), answers identical and 0 B per call vs base (`.scratch/d167/perf.cs`), WPR
-  no new hot frame. Timing not settled (busy machine). Register row written (D167 fixed on branch). Merge after D166:
-  `git merge --no-ff fix/d167-charged-walks` on main under commit.lock at 14 GB, then
-  `python .scratch/d167/register.py <merge hash>` (writes F157); STATE item 16: D167 merged, timing retake owed.
-- D163 D11 part in `.claude/worktrees/d163` (branch `perf/d163-d11-nodes` 9e8dc5de, committed): ratchet GREEN 10,398,
-  oracle only D171, bytes in the D163 row. Left: merge (inspections at >= 12 GB free); BDN time on a quiet evening.
-- D170, D171 judged port right on `test/judge-d170-d171` 17691546 (worktree `.claude/worktrees/judge-d170`): F159
-  (ledger 11 A, finditer leak), F160 (ledger 83, `(?e)` + `\K`); blind review did not refute; F158 left for D163.
-  Gates GREEN: ratchet 10,397; oracle seeds 7, 4242, 20261121, 20261122 diverge 0 (`.scratch/judge-d170/`). Left: merge.
-- D168 B/C/D in `.claude/worktrees/d168b` (branch `perf/d168-followups` 1ac4ed3a, committed, stacked on
-  `perf/d168-skip-through-firstset`): gates GREEN, logs in `.scratch/d168b/`. Left: merge after A (inspections at
-  >= 12 GB). Review worktree removed. Possible pre-existing lead from the blind review, unverified: partial lazy
-  `[ab]+?ab` over "c1 b " gives P(5,5) on main, Python P(3,5); check against KNOWN-DEFECTS before registering.
+- CI GREEN on 40f09940 (run 44948175075, 2026-11-21); main not pushed since.
+- Possible pre-existing lead from the D168 blind review, unverified: partial lazy `[ab]+?ab` over "c1 b " gives
+  P(5,5) on main, Python P(3,5); check against KNOWN-DEFECTS before registering.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
 
+- D71: option H or F (D71 row).
 - Item 16 B: choose the work budget API (C, A, B or D) and exception (X1-X3) from
   `2026-11-22-work-budget-design.md` section 10 (recommended: C, a per-call budget object; X3, a new exception).
 
-**Next action:** (1) merge into main with --no-ff at >= 14 GB free under commit.lock, in order: fix/d166-chunked-sweeps (then `.scratch/d166/register.py`), fix/d167-charged-walks (`.scratch/d167/register.py`), perf/d163-d11-nodes, test/judge-d170-d171, perf/d168-skip-through-firstset, perf/d168-followups, perf/d116g-anchor-memo (all gates GREEN; free RAM stayed 10-12.5 GB overnight); (2) quiet-machine timing for D166, D167, D163, D168, D116g; (3) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (4) `.claude/worktrees/d71b` holds the unsound option E (patch `.scratch/d71b/option-e.patch`): remove it.
+**Next action:** (1) quiet-machine timing (A-B-B-A, peers told) for D166, D167, D163, D168, D116g; (2) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (3) remove `.claude/worktrees/d71b` (unsound option E, patch `.scratch/d71b/option-e.patch`); (4) D169: WPR profile first.
