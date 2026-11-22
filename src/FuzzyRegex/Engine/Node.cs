@@ -71,18 +71,36 @@ internal sealed class Node
     internal Node? TrueNode;
 
     /// <summary>
+    /// NOT UPSTREAM'S, D163: the four parts below that only a lookaround, a condition's test, a
+    /// FUZZY node or a node in a body ever has (<see cref="LookaroundEnd"/>, <see cref="BodyInfo"/>,
+    /// <see cref="RunOutGroups"/>, <see cref="EnclosingSection"/>), or <see langword="null"/> while
+    /// none is set. As four fields they cost every node 32 B (D11, 65265cfd: +1,128 B to compile
+    /// <c>(quick|slow)\s+(?&lt;colour&gt;[a-z]+)\s+fox</c>); here they cost a node without them 8 B.
+    /// Set only while the pattern is compiled, and read only after.
+    /// </summary>
+    private LookaroundParts? _lookaroundParts;
+
+    /// <summary>
     /// NOT UPSTREAM'S, D11: for a lookaround or a condition's test, the node that ends its body, where
     /// a partial call's second pass goes when the body runs out of text
     /// (<c>Matcher.RunOutInALookaroundBody</c>).
     /// </summary>
-    internal Node? LookaroundEnd;
+    internal Node? LookaroundEnd
+    {
+        get => _lookaroundParts?.End;
+        set => PartsToSet(value)?.End = value;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, its body, which a
     /// run-out inside it reads (<c>Matcher.MarkTheBodysCapturesUnknown</c>, assert A10). Set by
     /// <c>PatternObject.SetLookaroundBodies</c> when the pattern is compiled.
     /// </summary>
-    internal Body? BodyInfo;
+    internal Body? BodyInfo
+    {
+        get => _lookaroundParts?.Body;
+        set => PartsToSet(value)?.Body = value;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D101: for a negative lookaround, whether its outcome in a partial call's
@@ -104,7 +122,11 @@ internal sealed class Node
     /// matches, the patterns whose run-outs make captures unknown. A group call is stepped over:
     /// its return restores every capture (D97).
     /// </summary>
-    internal (int Private, int Public)[]? RunOutGroups;
+    internal (int Private, int Public)[]? RunOutGroups
+    {
+        get => _lookaroundParts?.RunOutGroups;
+        set => PartsToSet(value)?.RunOutGroups = value;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D11 chunk 8: for a lookaround or a condition's test, or (D124) a FUZZY node,
@@ -114,7 +136,11 @@ internal sealed class Node
     /// section there, which is how the matcher reads it (D124 review, 2026-10-25: until then a
     /// pattern with no FUZZY node inside a body left it null for a construct inside a section).
     /// </summary>
-    internal Node? EnclosingSection;
+    internal Node? EnclosingSection
+    {
+        get => _lookaroundParts?.EnclosingSection;
+        set => PartsToSet(value)?.EnclosingSection = value;
+    }
 
     /// <summary>
     /// NOT UPSTREAM'S, D101 (B3a): for a lookaround or a condition's test in a fuzzy pattern with group
@@ -193,6 +219,24 @@ internal sealed class Node
     /// <c>(*SKIP)</c> is among them or in a group a call among them reaches, through any depth of
     /// calls.</param>
     internal sealed record Body(int[] Nodes, (int Private, int Public)[] Groups, bool HasVerbOrCall, bool ReachesVerb);
+
+    /// <summary>
+    /// The parts a setter writes to: none for a <see langword="null"/> value on a node that has
+    /// none, since every part already reads <see langword="null"/> there.
+    /// </summary>
+    /// <param name="value">The value being set.</param>
+    /// <returns>The node's parts, created for a non-null value, or <see langword="null"/>.</returns>
+    private LookaroundParts? PartsToSet(object? value) =>
+        value is null ? _lookaroundParts : _lookaroundParts ??= new LookaroundParts();
+
+    /// <summary>D163: the storage behind <see cref="_lookaroundParts"/>.</summary>
+    private sealed class LookaroundParts
+    {
+        internal Node? End;
+        internal Body? Body;
+        internal (int Private, int Public)[]? RunOutGroups;
+        internal Node? EnclosingSection;
+    }
 
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;

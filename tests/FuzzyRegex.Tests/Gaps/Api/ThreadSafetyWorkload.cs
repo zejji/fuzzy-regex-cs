@@ -215,6 +215,17 @@ internal static class ThreadSafetyWorkload
                 GenerateSubjects(13, "abc", ["aabc", "ababc", "aaaaac", "ac", "c"]),
                 static (pattern, subject) => Render(pattern.Match(subject))
             ),
+            // D163: a lookaround, a condition's test and a back-reference inside a fuzzy section,
+            // so the walk reaches every part of Node's lookaround parts, which only such nodes
+            // have; a partial call runs the second pass that reads them.
+            new Family(
+                "lookaround",
+                @"(?:(a)(?=b\1?)(?(?=c)c|d)){e<=1}",
+                FuzzyRegexOptions.None,
+                null,
+                GenerateSubjects(14, "abcd", ["abc", "abd", "ab", "a", "xabd"]),
+                static (pattern, subject) => Render(pattern.Match(subject, partial: true))
+            ),
             new Family(
                 "finditer",
                 "(a)(b)?",
