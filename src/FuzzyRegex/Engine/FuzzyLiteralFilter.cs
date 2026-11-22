@@ -163,10 +163,17 @@ internal sealed class FuzzyLiteralFilter
     internal const int CannotTell = -2;
 
     /// <summary>
-    /// Returned by <see cref="NextStart"/> when the scan polled the search's budget at a chunk
-    /// boundary and found it spent: the caller answers <c>MatchStatus.Cancelled</c>.
+    /// Returned by <see cref="NextStart"/> and <see cref="ReverseVerdict"/> when the scan or a piece
+    /// search (D167) polled the search's budget at a chunk boundary and found it spent: the caller
+    /// answers <c>MatchStatus.Cancelled</c>.
     /// </summary>
     internal const int Cancelled = -3;
+
+    /// <summary>Returned by <see cref="ReverseVerdict"/> when a reverse match may lie before the start.</summary>
+    internal const int MayMatch = 1;
+
+    /// <summary>Returned by <see cref="ReverseVerdict"/> when no reverse match can lie before the start.</summary>
+    internal const int MayNotMatch = 0;
 
     /// <summary>A remembered piece position meaning the piece is not in the rest of the slice.</summary>
     internal const int Absent = int.MaxValue;
@@ -1270,7 +1277,7 @@ internal sealed class FuzzyLiteralFilter
     /// The earliest position at or after <paramref name="textPos"/> where a forward match could
     /// start, or <see cref="NoMatch"/> when none can, or <see cref="CannotTell"/> when the stretch
     /// this call had to search is not all ASCII (case-insensitive pieces, or the scan; D144), or
-    /// <see cref="Cancelled"/> when the scan found the search's budget spent. While the scan is
+    /// <see cref="Cancelled"/> when the scan or a piece search found the search's budget spent. While the scan is
     /// armed the answer depends only on the subject and the two positions; <paramref name="memory"/>
     /// only saves searching again. A paused scan (see <see cref="ScanMemory.ScanPaused"/>) answers
     /// with the pieces alone, which is never later.
@@ -1279,7 +1286,7 @@ internal sealed class FuzzyLiteralFilter
     /// <param name="textPos">Where the next attempt would start.</param>
     /// <param name="sliceEnd">The end of the slice; no piece is searched for beyond it.</param>
     /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
-    /// <param name="state">The search, polled for cancellation at each chunk of a scan; none in tests.</param>
+    /// <param name="state">The search, polled for cancellation at each chunk of a scan or a piece search; none in tests.</param>
     /// <returns>A position, <see cref="NoMatch"/>, <see cref="CannotTell"/> or <see cref="Cancelled"/>.</returns>
     internal int NextStart(
         ReadOnlySpan<char> text,
@@ -1326,7 +1333,7 @@ internal sealed class FuzzyLiteralFilter
         // fails pays one attempt, and every later query is scanned.
         if (_scan is null || memory.TakePausedQuery() || (Pieces.Length != 0 && !memory.ArmSecondStage()))
         {
-            return Pieces.Length == 0 ? textPos : PiecesNextStart(text, textPos, sliceEnd, memory);
+            return Pieces.Length == 0 ? textPos : PiecesNextStart(text, textPos, sliceEnd, memory, state);
         }
 
         return ScanNextStart(_scan, text, textPos, sliceEnd, memory, state);
@@ -1363,7 +1370,7 @@ internal sealed class FuzzyLiteralFilter
         int answer;
         while (true)
         {
-            int x = Pieces.Length == 0 ? p : PiecesNextStart(text, p, sliceEnd, memory);
+            int x = Pieces.Length == 0 ? p : PiecesNextStart(text, p, sliceEnd, memory, state);
             if (x < 0)
             {
                 answer = x;
@@ -1418,7 +1425,13 @@ internal sealed class FuzzyLiteralFilter
     }
 
     /// <summary>The pieces' answer to <see cref="NextStart"/>; see there.</summary>
-    private int PiecesNextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, ScanMemory memory)
+    private int PiecesNextStart(
+        ReadOnlySpan<char> text,
+        int textPos,
+        int sliceEnd,
+        ScanMemory memory,
+        MatchState? state
+    )
     {
         int searchedWithoutFinding(int j) => _asciiPiece[j] ? Math.Max(0, sliceEnd - textPos) : 0;
 
@@ -1434,8 +1447,13 @@ internal sealed class FuzzyLiteralFilter
             {
                 int at =
                     textPos < sliceEnd && _asciiPiece[j]
-                        ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison)
+                        ? PolledIndexOf(text[textPos..sliceEnd], piece, _comparison, state)
                         : -1;
+                if (at == Cancelled)
+                {
+                    return Cancelled;
+                }
+
                 // What the search read: up to the occurrence, or all of it.
                 WorkCounter.Searched(at >= 0 ? at + piece.Length : searchedWithoutFinding(j));
                 memory.From[j] = textPos;
@@ -1473,6 +1491,84 @@ internal sealed class FuzzyLiteralFilter
     }
 
     /// <summary>
+    /// D167: the first occurrence of <paramref name="piece"/> in <paramref name="stretch"/>, or -1,
+    /// or <see cref="Cancelled"/>. One search costs up to the stretch's length times the piece's
+    /// when nearly every position is a near miss, so it runs as D166's sweeps do: in chunks of
+    /// <c>max(<see cref="Matcher.SweepChunkLength"/>, 4m)</c> start positions, each overlapping the
+    /// next by m - 1 code units so an occurrence straddling a chunk end is seen whole, with a poll
+    /// before every chunk but the first. A match under either comparison is m code units long, as
+    /// both compare unit for unit.
+    /// </summary>
+    /// <param name="stretch">The stretch to search.</param>
+    /// <param name="piece">The piece.</param>
+    /// <param name="comparison">The comparison.</param>
+    /// <param name="state">The search to poll; none in tests.</param>
+    /// <returns>The occurrence's index in <paramref name="stretch"/>, -1, or <see cref="Cancelled"/>.</returns>
+    private static int PolledIndexOf(
+        ReadOnlySpan<char> stretch,
+        string piece,
+        StringComparison comparison,
+        MatchState? state
+    )
+    {
+        int chunk = Math.Max(Matcher.SweepChunkLength, 4 * piece.Length);
+        for (int start = 0; start < stretch.Length; start = (int)Math.Min(stretch.Length, (long)start + chunk))
+        {
+            if (start > 0 && state is not null && Matcher.SafeCheckCancel(state))
+            {
+                return Cancelled;
+            }
+
+            int end = (int)Math.Min(stretch.Length, (long)start + chunk + piece.Length - 1);
+            int found = stretch[start..end].IndexOf(piece.AsSpan(), comparison);
+            if (found >= 0)
+            {
+                return start + found;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// D167: <see cref="PolledIndexOf"/> run backwards: the last occurrence of
+    /// <paramref name="piece"/> in <paramref name="stretch"/>, or -1, or <see cref="Cancelled"/>.
+    /// Chunks of start positions run back from the end, each searched with the m - 1 code units
+    /// after it, so the first hit is the last occurrence.
+    /// </summary>
+    /// <param name="stretch">The stretch to search.</param>
+    /// <param name="piece">The piece.</param>
+    /// <param name="comparison">The comparison.</param>
+    /// <param name="state">The search to poll; none in tests.</param>
+    /// <returns>The occurrence's index in <paramref name="stretch"/>, -1, or <see cref="Cancelled"/>.</returns>
+    private static int PolledLastIndexOf(
+        ReadOnlySpan<char> stretch,
+        string piece,
+        StringComparison comparison,
+        MatchState? state
+    )
+    {
+        int chunk = Math.Max(Matcher.SweepChunkLength, 4 * piece.Length);
+        for (int high = stretch.Length; high > 0; high = Math.Max(0, high - chunk))
+        {
+            if (high < stretch.Length && state is not null && Matcher.SafeCheckCancel(state))
+            {
+                return Cancelled;
+            }
+
+            int low = Math.Max(0, high - chunk);
+            int end = (int)Math.Min(stretch.Length, (long)high + piece.Length - 1);
+            int found = stretch[low..end].LastIndexOf(piece.AsSpan(), comparison);
+            if (found >= 0)
+            {
+                return low + found;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
     /// D144: whether <c>[from, to)</c> holds a surrogate, paired or not. A lone one is one unit to
     /// the engine, so counting it only widens the bound.
     /// </summary>
@@ -1503,11 +1599,31 @@ internal sealed class FuzzyLiteralFilter
     /// <param name="textPos">Where the reverse search starts.</param>
     /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
     /// <returns>Whether the engine must search at all.</returns>
-    internal bool MayMatchBefore(ReadOnlySpan<char> text, int sliceStart, int textPos, ScanMemory memory)
+    internal bool MayMatchBefore(ReadOnlySpan<char> text, int sliceStart, int textPos, ScanMemory memory) =>
+        ReverseVerdict(text, sliceStart, textPos, memory, state: null) != MayNotMatch;
+
+    /// <summary>
+    /// <see cref="MayMatchBefore"/> with the piece searches polling the search's budget (D167):
+    /// <see cref="MayMatch"/>, <see cref="MayNotMatch"/>, or <see cref="Cancelled"/> when a poll
+    /// found the budget spent.
+    /// </summary>
+    /// <param name="text">The whole subject.</param>
+    /// <param name="sliceStart">The start of the slice.</param>
+    /// <param name="textPos">Where the reverse search starts.</param>
+    /// <param name="memory">What this scan has learned so far; see <see cref="ScanMemory"/>.</param>
+    /// <param name="state">The search, polled between chunks of a piece search; none in tests.</param>
+    /// <returns>The verdict.</returns>
+    internal int ReverseVerdict(
+        ReadOnlySpan<char> text,
+        int sliceStart,
+        int textPos,
+        ScanMemory memory,
+        MatchState? state
+    )
     {
         if (textPos <= sliceStart)
         {
-            return true;
+            return MayMatch;
         }
 
         // Both facts below are about [sliceStart, x), so they hold for one slice start only.
@@ -1521,7 +1637,7 @@ internal sealed class FuzzyLiteralFilter
         // A piece or a non-ASCII character already seen inside the stretch settles it.
         if (textPos >= memory.WitnessEnd)
         {
-            return true;
+            return MayMatch;
         }
 
         ReadOnlySpan<char> stretch = text[sliceStart..textPos];
@@ -1534,12 +1650,17 @@ internal sealed class FuzzyLiteralFilter
             }
 
             // The last occurrence, so that the search reads back only as far as it must.
-            int at = stretch.LastIndexOf(Pieces[j].AsSpan(), _comparison);
+            int at = PolledLastIndexOf(stretch, Pieces[j], _comparison, state);
+            if (at == Cancelled)
+            {
+                return Cancelled;
+            }
+
             WorkCounter.Searched(at >= 0 ? stretch.Length - at : stretch.Length);
             if (at >= 0)
             {
                 memory.WitnessEnd = sliceStart + at + Pieces[j].Length;
-                return true;
+                return MayMatch;
             }
 
             memory.AbsentBelow[j] = textPos;
@@ -1549,10 +1670,10 @@ internal sealed class FuzzyLiteralFilter
         if (!_anyEncoding && !memory.IsAscii(text, sliceStart, textPos))
         {
             memory.WitnessEnd = memory.AsciiEnd + 1;
-            return true;
+            return MayMatch;
         }
 
-        return false;
+        return MayNotMatch;
     }
 
     /// <summary>A fresh <see cref="ScanMemory"/> sized for this filter's pieces.</summary>
