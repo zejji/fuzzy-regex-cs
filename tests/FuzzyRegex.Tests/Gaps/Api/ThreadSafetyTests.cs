@@ -1035,11 +1035,19 @@ public sealed class ThreadSafetyTests
             "Node.FuzzyRunLength",
             // Finding F-A: written by NodeCompiler.BuildBranch while the graph is built.
             "Node.HasEarlierDeletionTwin",
+            // D163: the lookaround parts below, created by their first non-null set, which runs
+            // while the pattern compiles.
+            "Node._lookaroundParts",
+            // D104 and D122: written by PatternObject.SetLookaroundBodies while the pattern compiles,
+            // and first reached by the walk when D163 gave the workload a lookaround family.
+            "CutBodyFacts.ContinuationKeyRepeats",
+            "CutBodyFacts.ContinuationOpenGroups",
+            "CutBodyFacts.MaxContinuationOpenGroups",
             // D11: written by NodeCompiler.BuildLookaround while the graph is built.
-            "Node.LookaroundEnd",
+            "LookaroundParts.End",
             // D11 chunk 8: written by PatternObject.SetLookaroundBodies, which Compile calls once
             // the nodes are numbered.
-            "Node.BodyInfo",
+            "LookaroundParts.Body",
             // D101: Node.MemoisesNegativeOutcome, set once by PatternObject.SetNegativeOutcomeMemo,
             // and (B3a) Node.RunByACall, set by PatternObject.MarkWhatACallCanRun, both while the
             // pattern compiles; one byte holds the two, and (D10) Node.SavesOnlyForCalls, set by
@@ -1048,9 +1056,9 @@ public sealed class ThreadSafetyTests
             "Node._flags",
             // D11 chunk 8, review round 1: written by PatternObject.SetRunOutGroups, which
             // SetLookaroundBodies calls.
-            "Node.RunOutGroups",
+            "LookaroundParts.RunOutGroups",
             // D11 chunk 8: written by PatternObject.SetEnclosingSections.
-            "Node.EnclosingSection",
+            "LookaroundParts.EnclosingSection",
             // D124: written by Compile once the lookaround bodies are set (SetVacuousDecisionLookarounds).
             "Node.HasVacuousDecision",
             // D141: written by Matcher.FillAsciiAnswers, the last pass of Compile.

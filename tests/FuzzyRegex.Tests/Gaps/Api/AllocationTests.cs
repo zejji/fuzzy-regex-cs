@@ -310,6 +310,30 @@ public sealed class AllocationTests
     }
 
     /// <summary>
+    /// D163: D11 gave every compiled node four fields that only a lookaround, a condition's test or
+    /// a node in their bodies ever sets (32 B a node; the compile of this pattern creates 35 nodes,
+    /// +1,128 B at 65265cfd). They now live in one object that only such nodes have, so a pattern
+    /// without lookarounds pays 8 B a node for them. The ceiling is the branch's count (Debug, JIT,
+    /// 2026-11-22); main 974e6c07 allocated 840 B more. Native AOT has no measured ceiling here, so
+    /// the test runs under the JIT only.
+    /// </summary>
+    [Test]
+    public void Compiling_a_pattern_without_lookarounds_pays_little_for_the_lookaround_fields()
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test("the ceiling is the JIT's; Native AOT's was not measured");
+        }
+
+        const string pattern = @"(quick|slow)\s+(?<colour>[a-z]+)\s+fox";
+        _ = new FuzzyRegex(pattern);
+
+        long allocated = AllocatedBy(static () => static () => _ = new FuzzyRegex(pattern));
+
+        allocated.Should().BeLessThanOrEqualTo(32_208, "a node outside a lookaround has no lookaround parts");
+    }
+
+    /// <summary>
     /// D138: a <see cref="MatchCollection"/> read only part-way never hands its walk's state back
     /// to the pattern's cache, so every such <c>Matches</c> call builds a fresh state. Release 1.2
     /// made that state 240 B bigger than 1.1.0's; the lists a plain or fuzzy pattern never fills
