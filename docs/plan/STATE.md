@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 01:37 (machine clock) by Claude Code builder (D166, D167 gates green; both merges waiting for 14 GB, free 10.1-12.5 GB since 00:30; the harness stopped the RAM wait under memory pressure).
+**Updated:** 2026-11-22 by Claude Code (D163 D11 part fixed on branch, gates green; merge waits for RAM).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -19,7 +19,7 @@ measurement, WPR profiles and benchmarks.
 | 12 | Repeat memo `HashSet` (~3%) | - | done: keep it (`2026-11-14-repeat-memo-share.md`: memo 0.08-0.13% of the grouped hit rows, WPR) | - |
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
-| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); new D163 (compile-per-call rows 1.09-1.18x slower, +9-13% bytes): profile and bisect; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); then pick the next fix: recommended D116 (design note with options first) |
+| 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); D163: D11 part fixed on `perf/d163-d11-nodes` 9e8dc5de (840 B a compile, gates green), merge waits for RAM; left: Teddy and ASCII tables lazy + size gate, needs a quiet timing window; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); then pick the next fix: recommended D116 (design note with options first) |
 | 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note (API, unit, scope) before code; D168, D169: WPR profile first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
@@ -60,6 +60,8 @@ measurement, WPR profiles and benchmarks.
   no new hot frame. Timing not settled (busy machine). Register row written (D167 fixed on branch). Merge after D166:
   `git merge --no-ff fix/d167-charged-walks` on main under commit.lock at 14 GB, then
   `python .scratch/d167/register.py <merge hash>` (writes F157); STATE item 16: D167 merged, timing retake owed.
+- D163 D11 part in `.claude/worktrees/d163` (branch `perf/d163-d11-nodes` 9e8dc5de, committed): ratchet GREEN 10,398,
+  oracle only D171, bytes in the D163 row. Left: merge (inspections at >= 12 GB free); BDN time on a quiet evening.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
