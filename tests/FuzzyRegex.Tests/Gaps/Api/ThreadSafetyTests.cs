@@ -986,6 +986,9 @@ public sealed class ThreadSafetyTests
             // S60b added LeadingRepeat, written once by Compile after FuzzyLiteralFilter. It points
             // at a node of the compiled graph and matching only reads it.
             "PatternObject.LeadingRepeat",
+            // D168 added SkipsTheLeadingRunOnlyOnACompletePass, written once with LeadingRepeat by
+            // the same call; matching only reads it.
+            "PatternObject.SkipsTheLeadingRunOnlyOnACompletePass",
             // S60b added LeadingStrings, written once by Compile next to LeadingRepeat. SearchValues
             // is immutable and safe to search from many threads.
             "PatternObject.LeadingStrings",

@@ -864,6 +864,12 @@ internal sealed class PatternObject
     internal Node? LeadingRepeat;
 
     /// <summary>
+    /// Whether the <see cref="LeadingRepeat"/> skip is taken only outside a partial call's second
+    /// pass: set for the lazy and atomic forms <see cref="FindLeadingRepeat"/> finds (D168).
+    /// </summary>
+    internal bool SkipsTheLeadingRunOnlyOnACompletePass;
+
+    /// <summary>
     /// The literals a search attempt can start with when the pattern opens with an alternation
     /// whose every branch opens with one, or <see langword="null"/>: ordinal when every literal is
     /// case-sensitive, ordinal ignore-case when .NET's rule finds every match of each (C6 option B).
@@ -1767,7 +1773,7 @@ internal sealed class PatternObject
             ? FuzzyLiteralFilter.TryCreateRequired(self)
             : null;
 
-        self.LeadingRepeat = FindLeadingRepeat(self);
+        self.LeadingRepeat = FindLeadingRepeat(self, out self.SkipsTheLeadingRunOnlyOnACompletePass);
 
         (
             self.LeadingStrings,
@@ -2056,12 +2062,18 @@ internal sealed class PatternObject
     /// pattern which does not start simply begins with, which upstream's test of the start node
     /// never does; see the body. Pinned by
     /// <c>OptimiserTrapsTests.A_leading_repeat_behind_the_first_set_check_is_skipped_like_a_bare_one</c>.
+    /// So it does through an atomic group that holds only the repeat, through the copies of the body
+    /// that compile a repeat's minimum, and to a lazy repeat outside an atomic group in a pattern with no verb (D168 options
+    /// B, C and D: the later rows of the same test, and the answer pins of
+    /// <c>OptimiserTrapsTests.A_leading_repeat_skip_behind_the_first_set_check_keeps_every_answer</c>).
     /// </para>
     /// </remarks>
     /// <param name="pattern">The compiled pattern.</param>
+    /// <param name="skipsOnlyOnACompletePass">Set to <see cref="SkipsTheLeadingRunOnlyOnACompletePass"/>.</param>
     /// <returns>The leading repeat, or <see langword="null"/>.</returns>
-    private static Node? FindLeadingRepeat(PatternObject pattern)
+    private static Node? FindLeadingRepeat(PatternObject pattern, out bool skipsOnlyOnACompletePass)
     {
+        skipsOnlyOnACompletePass = false;
         Node node = pattern.StartNode!;
         if (node.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne)
         {
@@ -2086,8 +2098,8 @@ internal sealed class PatternObject
         // (`[ab]{0,1000}\d` over "ab" x 15,000: 59,032,001 characters walked without the
         // look-through, 87,035,002 with it applied there too, Debug, 2026-11-22). The one-character
         // test keeps out a zero-width node that has no character to admit, such as Success, whose
-        // Next1 is empty (the empty-pattern pins throw without it). Step == 0 keeps this to the check: a
-        // consuming node in front (option B of the D168 design note) is not taken here.
+        // Next1 is empty (the empty-pattern pins throw without it). Step == 0 keeps this to the check;
+        // a consuming node in front is option B, below.
         bool behindTheCheck = false;
         if (mayLookThroughGroups && node.Step == 0 && NodeQueries.MatchesOneCharacter(node))
         {
@@ -2095,14 +2107,105 @@ internal sealed class PatternObject
             behindTheCheck = true;
         }
 
+        // NOT UPSTREAM (D168 option D): an atomic group whose body is exactly the repeat, as
+        // `[ab]*+` and `(?>[ab]*)` compile. Every attempt that starts inside the run takes it to the
+        // same end and tries the rest of the pattern there alone, as the failed attempt did. A body
+        // with more in it (EndAtomic, checked below) has no known witness against the skip; it is
+        // kept out so that the argument stays this short.
+        bool inAtomic = false;
+        if (mayLookThroughGroups && node.Op == Opcode.Atomic)
+        {
+            node = node.Next1.Node!;
+            inAtomic = true;
+        }
+
         while (mayLookThroughGroups && node.Op == Opcode.StartGroup)
         {
             node = node.Next1.Node!;
         }
 
-        return node.Op == Opcode.GreedyRepeatOne && (!behindTheCheck || node.Values[2] >= RegexFlags.Unlimited)
-            ? node
-            : null;
+        // NOT UPSTREAM (D168 option B): the copies of the body that BuildRepeat puts in front of
+        // the repeat for its minimum, as `[ab]+` compiles. Each must test exactly what the body
+        // tests (checked below): then the copies and the repeat together take exactly the run the
+        // skip counts from the attempt's start, a start inside it reaches only end positions the
+        // failed attempt tried, and one whose remainder is too short for the copies fails at them.
+        // A copy that admits more breaks that: in `[ab1][ab]*c` over "ab1bc" the run of [ab]
+        // counted from 0 ends at the 1, which the copy takes at 2, the leftmost match.
+        Node? firstCopy = null;
+        while (mayLookThroughGroups && node.Step != 0 && NodeQueries.MatchesOneCharacter(node))
+        {
+            firstCopy ??= node;
+            node = node.Next1.Node!;
+        }
+
+        // NOT UPSTREAM (D168 option C): a lazy repeat found this way. It tries the end positions
+        // upward, so a failed attempt has tried them all unless a (*SKIP) or (*PRUNE) cut it short
+        // (D77), so neither may be in the pattern. Matcher's FAILURE arm refuses a lazy skip with a
+        // verb as well, but the oracle's SkipsALazyRunDespiteAVerb lifts that for upstream's own
+        // skip of a lazy start node, and upstream never skips here. Not in an atomic group: that commits to the shortest run and tries the rest of the
+        // pattern only at the start, so `(?>[ab]*?)\d` fails at 0 over "ab1" and matches at 2.
+        bool lazy = node.Op == Opcode.LazyRepeatOne && !inAtomic && !pattern.HasBacktrackingVerb;
+        if (node.Op != Opcode.GreedyRepeatOne && !lazy)
+        {
+            return null;
+        }
+
+        bool lookedFurther = behindTheCheck || inAtomic || firstCopy is not null || lazy;
+        if (
+            (lookedFurther && node.Values[2] < RegexFlags.Unlimited)
+            || (inAtomic && node.Next1.Node?.Op != Opcode.EndAtomic)
+        )
+        {
+            return null;
+        }
+
+        for (Node? copy = firstCopy; copy is not null && copy != node; copy = copy.Next1.Node)
+        {
+            if (!TestsTheSameCharacters(copy, node.Next2.Node!))
+            {
+                return null;
+            }
+        }
+
+        // The lazy and atomic forms are this port's alone, and the run-outs of a partial call's
+        // second pass (D11) are argued for neither, so they skip only on a complete pass, kept as
+        // caution.
+        skipsOnlyOnACompletePass = lazy || inAtomic;
+        return node;
+    }
+
+    /// <summary>
+    /// Whether two one-character nodes test the same characters: the same opcode, negation and
+    /// values, and the same set members in the same order. Separate copies of one source item,
+    /// such as a repeat's minimum and its body, compile to this.
+    /// </summary>
+    /// <param name="first">One node.</param>
+    /// <param name="second">The other.</param>
+    /// <returns><see langword="true"/> if the two are the same test.</returns>
+    private static bool TestsTheSameCharacters(Node first, Node second) =>
+        first.Op == second.Op
+        && first.Match == second.Match
+        && first.Values.AsSpan().SequenceEqual(second.Values)
+        && SameMembers(first.Next2.Node, second.Next2.Node);
+
+    /// <summary>The member lists of two sets, item by item, for <see cref="TestsTheSameCharacters"/>.</summary>
+    /// <param name="first">The first member of one list, or <see langword="null"/>.</param>
+    /// <param name="second">The first member of the other.</param>
+    /// <returns><see langword="true"/> if the two lists are the same.</returns>
+    private static bool SameMembers(Node? first, Node? second)
+    {
+        while (first is not null && second is not null)
+        {
+            if (!TestsTheSameCharacters(first, second))
+            {
+                return false;
+            }
+
+            first = first.Next1.Node;
+            second = second.Next1.Node;
+        }
+
+        return first is null && second is null;
     }
 
     /// <summary>
