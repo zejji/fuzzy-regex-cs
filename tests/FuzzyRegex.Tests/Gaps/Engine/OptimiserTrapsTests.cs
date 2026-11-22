@@ -396,6 +396,16 @@ public sealed class OptimiserTrapsTests
     [Arguments(@"[ab]*\d", "abab ab9", 5, 3)]
     [Arguments(@"([ab]*)\d", "abab ab9", 5, 3)]
     [Arguments(@"[ab]*\d", "5ab", 0, 1)]
+    [Arguments(@"[ab]+\d", "abab aab9", 5, 4)]
+    [Arguments(@"[ab]{3,}\d", "abab aab9", 5, 4)]
+    [Arguments(@"(?i)[ab]+\d", "abab aab9", 5, 4)]
+    [Arguments(@"\w+@", "abab aab@", 5, 4)]
+    [Arguments(@"[ab]*?\d", "abab aab9", 5, 4)]
+    [Arguments(@"[ab]+?\d", "abab aab9", 5, 4)]
+    [Arguments(@"([ab]*?)\d", "abab aab9", 5, 4)]
+    [Arguments(@"[ab]*+\d", "abab aab9", 5, 4)]
+    [Arguments(@"(?>[ab]*)\d", "abab aab9", 5, 4)]
+    [Arguments(@"[ab]++\d", "abab aab9", 5, 4)]
     [Property("Upstream", "regex 2026.9.29, the answers only; upstream is quadratic here (D168)")]
     public void A_leading_repeat_behind_the_first_set_check_is_skipped_like_a_bare_one(
         string source,
@@ -412,8 +422,10 @@ public sealed class OptimiserTrapsTests
         // (Debug, 2026-11-22). regex 2026.9.29 measured 1,132 ms at 10,000 and 8,561 ms at 30,000.
         // The check is a test, not a step, so the starts inside the run reach the same end
         // positions the failed attempt tried; the walk is then a few passes of the subject.
-        // `[ab]+\d` is still quadratic: its compiled form starts with a one-character [ab] in front
-        // of the repeat, which this look-through does not cover (the rest of D168).
+        // Options B, C and D (the later rows): the minimum of `[ab]+` is compiled as copies of the
+        // body in front of the repeat, the possessive and atomic forms wrap it in Atomic ...
+        // EndAtomic, and the lazy form is a LazyRepeatOne. Each walked 450,045,001 to 900,060,000
+        // characters at 30,000 characters of "ab" before it was looked through (Debug, 2026-11-22).
         var pattern = new FuzzyRegex(source, FuzzyRegexOptions.None, EngineWork.HangGuard);
         string subject = string.Concat(Enumerable.Repeat("ab", 5_000));
 
@@ -481,12 +493,45 @@ public sealed class OptimiserTrapsTests
     [Arguments(@"(?e)[ab]*\d", "ab ab1", false, false, 0, -1, "(3,6)")]
     [Arguments(@"(?V1)[[ab]--[b]]*\d", "ab ab1", false, false, 0, -1, "(5,6)")]
     [Arguments(@"(?i)(?-i:[ab]*)\d", "xAB1 ab2", false, false, 0, -1, "(3,4) (5,8)")]
-    // Not looked through (fuzzy, reverse) or not covered yet (the rest of D168): pinned all the same.
+    // Not looked through (fuzzy, reverse): pinned all the same.
     [Arguments(@"(?:[ab]*\d){e<=1}", "ab ab1", false, false, 0, -1, "(0,6) (6,6)")]
     [Arguments(@"(?r)[ab]*\d", "ab ab1", false, true, 0, -1, "(3,6) (0,0)P")]
+    // Option B: copies of the body in front of the repeat (its minimum). A copy that is not the
+    // body keeps every start: in `[ab1][ab]*c` over "ab1bc" the run of [ab] counted from 0 ends at
+    // the 1, which the copy takes at 2 (red when the copies are not compared, mutation 2026-11-22).
     [Arguments(@"[ab]+\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
-    [Arguments(@"[ab]*+\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Arguments(@"[ab]{3,}\d", "ab abb1 aab2 b3 bbab4", true, false, 0, -1, "(3,7) (8,12) (16,21) (17,21)")]
+    [Arguments(@"\w+@", "ab cd@ e@", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
+    [Arguments(@"(?i)[ab]+\d", "Ab aB1 b2", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
+    [Arguments(@"[ab]a[ab]*\d", "aba9", false, false, 0, -1, "(1,4)")]
+    [Arguments(@"[ab1][ab]*c", "ab1bc ba1ac", true, false, 0, -1, "(2,5) (3,5) (8,11) (9,11)")]
+    [Arguments(@"[ab]b[ab]*\d", "abb9 aab9", true, false, 0, -1, "(0,4) (1,4) (6,9)")]
+    [Arguments(@"[ab]+\d", "1 abab", false, true, 0, -1, "(2,6)P")]
+    [Arguments(@"([ab]+)(\d)", "ab ab1", true, false, 0, -1, "(3,6)g(3,5)(5,6) (4,6)g(4,5)(5,6)")]
+    [Arguments(@"[ab]+(?<=a)\d", "ba22b ab1", true, false, 0, -1, "(0,3) (1,3)")]
+    [Arguments(@"[ab]{2,}b\d", "ab abb1 abbb2", true, false, 0, -1, "(3,7) (8,13) (9,13)")]
+    // Option C: lazy, not with a backtracking verb, not in an atomic group, and not in a partial
+    // call's second pass.
     [Arguments(@"[ab]*?\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Arguments(@"[ab]*?\d", "ab ab", false, true, 0, -1, "(3,5)P")]
+    [Arguments(@"[ab]*?\d", "1 abab", false, true, 0, -1, "(0,1) (2,6)P")]
+    [Arguments(@"[ab]*?(*SKIP)b", "aab", false, false, 0, -1, "(2,3)")]
+    [Arguments(@"[ab]*?(*PRUNE)\d", "ab ab1", false, false, 0, -1, "(5,6)")]
+    [Arguments(@"([ab]*?)\d", "ab ab1", true, false, 0, -1, "(3,6)g(3,5) (4,6)g(4,5) (5,6)g(5,5)")]
+    [Arguments(@"[ab]+?\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
+    [Arguments(@"[ab]*?b\d", "ab ab1 abb2", true, false, 0, -1, "(3,6) (4,6) (7,11) (8,11) (9,11)")]
+    [Arguments(@"[ab]*?(?<=b)\d", "ab ba1 ab2", true, false, 0, -1, "(7,10) (8,10) (9,10)")]
+    [Arguments(@"(?>[ab]*?)\d", "ab1 b2", true, false, 0, -1, "(2,3) (5,6)")]
+    // Option D: an atomic group whose body is exactly the repeat (and its copies).
+    [Arguments(@"[ab]*+\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Arguments(@"(?>[ab]*)\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (5,6) (7,9) (8,9)")]
+    [Arguments(@"[ab]++\d", "ab ab1 b2", true, false, 0, -1, "(3,6) (4,6) (7,9)")]
+    [Arguments(@"[ab]*+b", "ab abb", true, false, 0, -1, "")]
+    [Arguments(@"(?>[ab]*)(?<=b)\d", "ab ab1 ba2", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
+    [Arguments(@"[ab]*+\d", "1 abab", false, true, 0, -1, "(0,1) (2,6)P")]
+    [Arguments(@"[ab]*+(*SKIP)\d", "ab ab1", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
+    [Arguments(@"(?>([ab]*))\d", "ab ab1", true, false, 0, -1, "(3,6)g(3,5) (4,6)g(4,5) (5,6)g(5,5)")]
+    [Arguments(@"(?>[ab]*b?)\d", "ab ab1", true, false, 0, -1, "(3,6) (4,6) (5,6)")]
     [Property("Upstream", "regex 2026.9.29 finditer, 2026-11-22")]
     public void A_leading_repeat_skip_behind_the_first_set_check_keeps_every_answer(
         string source,

@@ -26303,8 +26303,11 @@ internal static class Matcher
         // "Backtracking control"). A greedy repeat tries the longest length first, so any
         // start inside the run would reach the same verb at the same place and fail the
         // same way; it keeps the skip. The oracle's PatternObject.SkipsALazyRunDespiteAVerb
-        // restores upstream's skip. LeadingRepeat is lazy only when it is the start node
-        // itself, so this is D77's test unchanged.
+        // restores upstream's skip. LeadingRepeat is lazy with a verb in the pattern only when
+        // it is the start node itself, so this is D77's test unchanged.
+        //
+        // NOT UPSTREAM'S, D168: the lazy and atomic forms FindLeadingRepeat finds skip only
+        // outside a partial call's second pass (SkipsTheLeadingRunOnlyOnACompletePass).
         if (
             pattern.LeadingRepeat is Node leadingRepeat
             && (
@@ -26312,6 +26315,7 @@ internal static class Matcher
                 || !pattern.HasBacktrackingVerb
                 || pattern.SkipsALazyRunDespiteAVerb
             )
+            && (!pattern.SkipsTheLeadingRunOnlyOnACompletePass || state.PartialSide == MatchState.PartialNone)
         )
         {
             // How many characters did the repeat actually match?
