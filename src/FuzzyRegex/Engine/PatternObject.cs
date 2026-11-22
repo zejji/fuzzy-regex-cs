@@ -418,9 +418,11 @@ internal sealed class PatternObject
     internal bool RefinesInAWindow;
 
     /// <summary>
-    /// NOT UPSTREAM'S, D115: whether the pattern holds a <c>\G</c>, whose answer depends on where a
-    /// search began, so a failed search from one position says nothing about a search from a later
-    /// one. See <c>Matcher.BestWalkKnownToFail</c>.
+    /// NOT UPSTREAM'S, D115: whether the pattern holds a <c>\G</c>, which holds where the matching
+    /// operation began. Since D116 option G it no longer withholds the BESTMATCH walk memo (a
+    /// <c>\G</c> in a body against the scan does, through <see cref="LooksBackAtTheAnchor"/>); it
+    /// only stops a fact from an earlier operation answering for the first attempt of a search
+    /// from the same start. See <c>Matcher.BestWalkKnownToFail</c>.
     /// </summary>
     internal bool ReadsTheSearchAnchor;
 

@@ -1425,7 +1425,7 @@ internal static class NodeCompiler
     /// <summary>
     /// NOT UPSTREAM'S, D116: sets <see cref="PatternObject.LooksBackAtTheAnchor"/> when the body of
     /// a lookaround against the scan, or a conditional's test, holds something that can read the
-    /// search anchor.
+    /// search anchor or the position <c>\G</c> holds at.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1445,6 +1445,9 @@ internal static class NodeCompiler
     /// holds a flagged item too; kept for a section whose items carry no flag, an empty one say,
     /// which is counted as fuzzy rather than argued exact. The body's <c>is_fuzzy</c> is not read:
     /// only <c>BuildFuzzy</c> sets it, and that always creates a section node here.</item>
+    /// <item>A <c>\G</c> (<see cref="Opcode.SearchAnchor"/>, D116 option G): it holds where the
+    /// operation began, at or before the search's start, which only a body against the scan can
+    /// read back to. Elsewhere it no longer withholds the memo.</item>
     /// </list>
     /// </remarks>
     /// <param name="pattern">The pattern being compiled.</param>
@@ -1460,7 +1463,10 @@ internal static class NodeCompiler
         for (int i = firstBodyNode; i < nodes.Count; i++)
         {
             Node node = nodes[i];
-            if (node.Op is Opcode.GroupCall or Opcode.Fuzzy or Opcode.EndFuzzy || (node.Status & NodeStatus.Fuzzy) != 0)
+            if (
+                node.Op is Opcode.GroupCall or Opcode.Fuzzy or Opcode.EndFuzzy or Opcode.SearchAnchor
+                || (node.Status & NodeStatus.Fuzzy) != 0
+            )
             {
                 pattern.LooksBackAtTheAnchor = true;
                 return;

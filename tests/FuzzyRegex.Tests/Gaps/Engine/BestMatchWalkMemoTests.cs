@@ -214,4 +214,79 @@ public sealed class BestMatchWalkMemoTests
             )
             .Should()
             .Be(expected);
+
+    // D116 option G: a \G outside every body against the scan never holds on an attempt the memo
+    // skips, so it no longer withholds the memo. Text from the 2026-11-22 options note, where
+    // matches touch and \G holds often. Debug steps at 4,000 characters, main ea8148f6 (first row
+    // first): STEPS_MAIN; with the change STEPS_BRANCH. Answers are checked against the memo
+    // withheld, which is how main runs every pattern with a \G.
+    [Test]
+    [Category(EngineWork.Category)]
+    [Arguments(@"(?b)\G?(?:the\s(?>[a-z]+)\s){e<=1}")]
+    [Arguments(@"(?b)(?:\G|(?<=\s))(?:the\s(?>[a-z]+)\s){e<=1}")]
+    [Arguments(@"(?br)(?:the\s(?>[a-z]+)\s){e<=1}(?:\G|(?=\s))")]
+    public void A_bestmatch_scan_with_a_search_anchor_outside_a_lookbehind_reads_the_text_a_bounded_number_of_times(
+        string pattern
+    )
+    {
+        const string dense = "the a the bb thx c tha d the e  he f the gg ";
+        string text = string.Concat(Enumerable.Repeat(dense, (4_000 / dense.Length) + 1))[..4_000];
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        var withheld = new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard);
+        withheld.PatternObject.LooksBackAtTheAnchor = true;
+
+        string[] expected = [.. withheld.Matches(text).Select(static m => $"{m.Index},{m.Length},{m.FuzzyCounts}")];
+
+        EngineWork.ShouldTakeAtMostSteps(
+            () =>
+                regex
+                    .Matches(text)
+                    .Select(static m => $"{m.Index},{m.Length},{m.FuzzyCounts}")
+                    .Should()
+                    .Equal(expected),
+            1_000_000,
+            "a failed search for a better match is not repeated for every match"
+        );
+    }
+
+    // D116 option G: a \G in a body against the scan can read back to where the search began, so
+    // it keeps the memo withheld (NodeCompiler.NoteABodyThatCanReachTheAnchor). From the option G
+    // grid (2026-11-22): a lookbehind, a lookahead nested in a lookbehind, and a reversed pattern's
+    // conditional test. Each expected answer is main ea8148f6's. Without the SearchAnchor term
+    // there, the first and third rows change; the second changes only when the same-start rule of
+    // the next test is dropped as well (mutation runs, 2026-11-22).
+    [Test]
+    [Arguments(@"(?b)(?<=\G.{0,2})(?:(?>a+)){s<=1}", "bxba", "0,1,1,0,0|3,1,0,0,0")]
+    [Arguments(@"(?b)(?:a?[ab]){d<=1}(?<=(?=\G).)", "bxab", "0,1,0,0,0|2,0,0,0,1|2,1,0,0,0|3,1,0,0,0")]
+    [Arguments(@"(?br)(?:a?x+?){s<=1}(?(?=.?\G)a|b)", "axxaaa aaxbb\n", "8,3,0,0,0|5,3,1,0,0|2,2,0,0,0")]
+    public void A_search_anchor_in_a_body_against_the_scan_keeps_the_memo_withheld(
+        string pattern,
+        string text,
+        string expected
+    ) => Answers(pattern, text).Should().Be(expected);
+
+    // D116 option G: the first finditer step reports an empty match at 1 after a failed exact
+    // search from 1, when \G held at 0. The second step resumes at 1, where \G now holds, finds
+    // 'ab' with one substitution through 'zb' first, and searches from 1 again for an exact match.
+    // The fact from the first step must not answer for that search's first attempt: \Gab matches
+    // there exactly. Expected answers are main ea8148f6's; with the fact answering, the second
+    // match reads 1,2,1,0,0 (found by reasoning, 2026-11-22; no grid row hit this case).
+    [Test]
+    [Arguments(@"(?b)(?:(?<=x)(?:c){d<=1}|(?:zb){s<=1}|\Gab)", "xab", "1,0,0,0,1|1,2,0,0,0")]
+    [Arguments(@"(?b)(?:(?<=x)(?:c){d<=1}|(?:zb){s<=1}|(?:\Gab){s<=2})", "yxab", "2,0,0,0,1|2,2,0,0,0")]
+    public void A_failed_search_from_an_earlier_finditer_step_does_not_answer_where_the_search_anchor_now_holds(
+        string pattern,
+        string text,
+        string expected
+    ) => Answers(pattern, text).Should().Be(expected);
+
+    private static string Answers(string pattern, string text) =>
+        string.Join(
+            '|',
+            new FuzzyRegex(pattern, FuzzyRegexOptions.None, EngineWork.HangGuard)
+                .Matches(text)
+                .Select(static m =>
+                    $"{m.Index},{m.Length},{m.FuzzyCounts.Substitutions},{m.FuzzyCounts.Insertions},{m.FuzzyCounts.Deletions}"
+                )
+        );
 }
