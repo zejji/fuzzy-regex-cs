@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 by Claude Code (D71 option E researched, not built; F148 compile-byte note corrected).
+**Updated:** 2026-11-22 05:45 by Claude Code (overnight: seven branches gated GREEN, merges waiting for RAM).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -77,4 +77,4 @@ measurement, WPR profiles and benchmarks.
 - Item 16 B: choose the work budget API (C, A, B or D) and exception (X1-X3) from
   `2026-11-22-work-budget-design.md` section 10 (recommended: C, a per-call budget object; X3, a new exception).
 
-**Next action:** (1) D166: merge into main once free RAM >= 14 GB (gates GREEN, see In flight), then register F156 and STATE item 16; timing retake on a quiet machine (morning); (2) D167; (3) D163.
+**Next action:** (1) merge into main with --no-ff at >= 14 GB free under commit.lock, in order: fix/d166-chunked-sweeps (then `.scratch/d166/register.py`), fix/d167-charged-walks (`.scratch/d167/register.py`), perf/d163-d11-nodes, test/judge-d170-d171, perf/d168-skip-through-firstset, perf/d168-followups, perf/d116g-anchor-memo (all gates GREEN; free RAM stayed 10-12.5 GB overnight); (2) quiet-machine timing for D166, D167, D163, D168, D116g; (3) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (4) `.claude/worktrees/d71b` holds the unsound option E (patch `.scratch/d71b/option-e.patch`): remove it.
