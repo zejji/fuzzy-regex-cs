@@ -20,7 +20,7 @@ measurement, WPR profiles and benchmarks.
 | 13 | Design note: reuse an abandoned `Matches` state (b') | - | done: `2026-11-05-abandoned-matches-state-design.md` | recommends (a) unless a re-measure after D138 shows a gap > ~150 ns / 1 KB |
 | 14 | Judge unjudged oracle rows (DECISIONS 2026-11-14) | judge-a, judge-b | merged to main a4201953 2026-11-14: all nine port right (F137-F145) | - |
 | 15 | Triage pre-1.0 perf rows D33, D68, D71, D82, D99, D105, D116, D118, D123 | - | D105 merged (F146: aa04c939 inliner, e9161a9c widths; 500-group compile Release 95.8 to 9.7 ms; ratchet GREEN 10,302); D118 closed (F147, linear since before 1.2.0); D71, D99, D116, D123 re-measured 2026-11-15, unchanged since 1.2.0, still open (notes in their rows); D33 pinned by a test | D68 merged (F151, recursive calls save only what their body can write); D71 profiled (`2026-11-17-d71-fork-cost-profile.md`); option A merged (key hashed once, X1 5-10% faster), D71 open for the rest of the memo's cost; D82 closed 2026-11-18 (F152: every named row below the 2026-09-27 baseline); D163: D11 part fixed on `perf/d163-d11-nodes` 9e8dc5de (840 B a compile, gates green), merge waits for RAM; left: Teddy and ASCII tables lazy + size gate, needs a quiet timing window; D99 merged (F155, main 8887e325, gates GREEN 2026-11-18); then pick the next fix: recommended D116 (design note with options first) |
-| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note (API, unit, scope) before code; D168, D169: WPR profile first |
+| 16 | Bounded search and a work budget (owner 2026-11-21, spec amendment 38, DECISIONS 2026-11-21) | - | registered: D166 (prefix sweeps unpolled), D167 (`CountOne`, fuzzy piece searches), D168 (`[ab]*\d` quadratic, inherited), D169 (ignore-case screen vs .NET) | A: D166 test-first with `ExpiresOnCheck`, then D167; B: design note written (`2026-11-22-work-budget-design.md`), owner to choose API from note; D168, D169: WPR profile first |
 
 "Green" = ratchet GREEN and oracle 3 seeds diverging only on known rows identical on main. Profile:
 `docs/plan/2026-11-04-phase11-profile.md`. BDN: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-11-05-phase11-integration-vs-main.md`.
@@ -64,6 +64,9 @@ measurement, WPR profiles and benchmarks.
   oracle only D171, bytes in the D163 row. Left: merge (inspections at >= 12 GB free); BDN time on a quiet evening.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
-## Waiting on the owner: nothing (transpositions decided 2026-11-14, parked post-1.3).
+## Waiting on the owner
+
+- Item 16 B: choose the work budget API (C, A, B or D) and exception (X1-X3) from
+  `2026-11-22-work-budget-design.md` section 10 (recommended: C, a per-call budget object; X3, a new exception).
 
 **Next action:** (1) D166: merge into main once free RAM >= 14 GB (gates GREEN, see In flight), then register F156 and STATE item 16; timing retake on a quiet machine (morning); (2) D167; (3) D163.
