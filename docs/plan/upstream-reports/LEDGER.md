@@ -198,6 +198,13 @@ unchanged `IGN` and string arms keep their wrong answers, which ties the fault t
 a lead from the 2026-10-09 triage; blind review and patched build on 2026-10-10. Pinned by
 `PartialMatchingTests` (the second-door rows).
 
+**The forward string-tail arms too (2026-11-23).** regex 2026.9.29 answers
+`regex.match(r'[ab]+?ab', 'b ', partial=True)` as (0, 2) partial, and the same for `(?i)` and
+`(?fi)` (the `STRING`, `STRING_IGN` and `STRING_FLD` arms); `[ab]` refuses the space, so no
+continuation completes it. As a search over 'c1 b ' it is (3, 5) partial where the greedy twin is
+(5, 5). The port answers None, and (5, 5) for the search. Found by the D168 blind review. Pinned by
+the same test; guarding the string arms one step out turns the new rows red.
+
 **Measured over a grid, three sources against each other.** 48,960 rows (`match` and `fullmatch`,
 forward and reversed, six lazy quantifiers, three items, one- and two-character tails, with and
 without IGNORECASE, every subject of up to three characters from `acxb`), `regex` 2026.9.10:

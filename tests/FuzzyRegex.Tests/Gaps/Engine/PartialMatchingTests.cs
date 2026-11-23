@@ -274,6 +274,11 @@ public sealed class PartialMatchingTests
                 (@"(?r)b(?:a)*?", "xa"),
                 (@"(?r)bc(?:a)*?", "x"),
                 (@"[^c]??x", "c"),
+                // The forward string-tail arms (STRING, STRING_IGN, STRING_FLD) guard the same way:
+                // regex 2026.9.29 answers (0, 2) partial for all three, measured 2026-11-23.
+                (@"[ab]+?ab", "b "),
+                (@"(?i)[ab]+?ab", "b "),
+                (@"(?fi)[ab]+?ab", "b "),
             }
         )
         {
@@ -285,7 +290,14 @@ public sealed class PartialMatchingTests
 
         // Where the repeat CAN take the last character, the partial stays.
         foreach (
-            (string pattern, string subject) in new[] { (@"(.{3,}?)x", "abcde"), (@"(?r)ab??", "b"), ("ba??x", "ba") }
+            (string pattern, string subject) in new[]
+            {
+                (@"(.{3,}?)x", "abcde"),
+                (@"(?r)ab??", "b"),
+                ("ba??x", "ba"),
+                (@"[ab]+?ab", "ba"),
+                (@"(?i)[ab]+?ab", "B"),
+            }
         )
         {
             Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);

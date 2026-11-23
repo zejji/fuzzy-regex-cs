@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-22 by Claude Code (seven branches merged to main, not pushed).
+**Updated:** 2026-11-23 by Claude Code (d71b removed; D168 review lead closed as ledger 2, pinned).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -38,8 +38,7 @@ measurement, WPR profiles and benchmarks.
 - Merged to main 2026-11-22, not pushed: D166 227dcc16 (+F156 cdc9300a), D167 c31bf0c8 (+F157 827fc7ae), D163 D11 part
   57e674fd, judge D170/D171 804ccc9c (F159, F160), D168 A bcc8a64e, D168 B/C/D f78fd9eb, D116g efc9771f. Ratchet on
   main: GREEN 10,526 on efc9771f (baseline unchanged). Worktrees kept: d166, d167, d163, judge-d170, d168b, d116g. CI last GREEN on 40f09940 (run 44948175075).
-- D71 option E experiment: `.claude/worktrees/d71b` (branch `perf/d71-next`, uncommitted, patch `.scratch/d71b/option-e.patch`). Unsound (D71 row); delete the worktree once option F or H is decided.
-- Possible pre-existing lead from the D168 blind review, unverified: partial lazy `[ab]+?ab` over "c1 b " gives P(5,5) on main, Python P(3,5); check against KNOWN-DEFECTS before registering.
+- D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
@@ -47,4 +46,4 @@ measurement, WPR profiles and benchmarks.
 - D71: option H or F (D71 row).
 - Item 16 B: choose the work budget API (C, A, B or D) and exception (X1-X3) from `2026-11-22-work-budget-design.md` section 10 (recommended: C, a per-call budget object; X3, a new exception).
 
-**Next action:** (1) quiet-machine timing (A-B-B-A, peers told) for D166, D167, D163, D168, D116g; (2) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (3) remove `.claude/worktrees/d71b` (unsound option E, patch `.scratch/d71b/option-e.patch`); (4) D169: WPR profile first.
+**Next action:** (1) quiet-machine timing (A-B-B-A, peers told) for D166, D167, D163, D168, D116g; (2) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (3) D169: WPR profile first.
