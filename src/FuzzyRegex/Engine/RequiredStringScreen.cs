@@ -399,8 +399,8 @@ internal static class RequiredStringScreen
     /// characters before the anchor fix its distance.
     /// </para>
     /// <para>
-    /// <b>Which.</b> The character that occurs fewest times in the string itself, the lowest index
-    /// on a tie. Text that defeats the search is text that resembles the string, and a walk from
+    /// <b>Which.</b> The character that occurs fewest times in the string itself, counting its
+    /// other cases as the same character, the lowest index on a tie. Text that defeats the search is text that resembles the string, and a walk from
     /// each place holding the first character can only run long when the string repeats that
     /// character: a window that matched L characters holds no other copy of a character the string
     /// holds once, so the next place is at least L on and the walks add up to the text's length.
@@ -426,15 +426,19 @@ internal static class RequiredStringScreen
         bool exact = reqString.Op == Opcode.StringRev;
         CaseEncoding encoding = reqString.Encoding;
 
+        // Counted by case class, so that "Abab" counts its a twice: the lowest member of the
+        // character's closure stands for the class.
+        var classes = new Dictionary<uint, uint>();
         var counts = new Dictionary<uint, int>();
         foreach (uint value in values)
         {
-            counts[value] = counts.GetValueOrDefault(value) + 1;
+            uint key = ClassOf(value);
+            counts[key] = counts.GetValueOrDefault(key) + 1;
         }
 
         var followers = new Dictionary<uint, (uint[] Next, bool WideAtEdge)?>();
         int best = 0;
-        int bestCount = counts[At(0)];
+        int bestCount = counts[ClassOf(At(0))];
 
         for (int k = 1; k < length; k++)
         {
@@ -464,16 +468,33 @@ internal static class RequiredStringScreen
                 }
             }
 
-            if (counts[At(k)] < bestCount)
+            int count = counts[ClassOf(At(k))];
+            if (count < bestCount)
             {
                 best = k;
-                bestCount = counts[At(k)];
+                bestCount = count;
             }
         }
 
         return best;
 
         uint At(int index) => values[reverse ? length - 1 - index : index];
+
+        uint ClassOf(uint value)
+        {
+            if (exact)
+            {
+                return value;
+            }
+
+            if (!classes.TryGetValue(value, out uint key))
+            {
+                key = CaseClosure(encoding, value).Min();
+                classes[value] = key;
+            }
+
+            return key;
+        }
     }
 
     /// <summary>
