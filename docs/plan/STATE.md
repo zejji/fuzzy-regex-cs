@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-23 22:05 by Claude Code (timing done, main pushed, two builders running).
+**Updated:** 2026-11-24 00:50 by Claude Code (D169 merged; budget in review; D172 registered).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -38,12 +38,11 @@ measurement, WPR profiles and benchmarks.
 - Quiet-machine timing done 2026-11-23 (1c01df05, `.scratch/timing-1123/results.md`): D168 A-D and D116g faster on
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
 - Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
-- D169 builder done 2026-11-23: `perf/d169-rare-anchor` 1dee129a, gates GREEN per its report (D169 row); orchestrator
-  reproduced hostile-i/long 720 to 0.003 ms; blind review (Opus, background) running. Then merge, ratchet, inspect.
-- Builders started 2026-11-23 ~22:00 (Opus, background, this session): D169 in `.claude/worktrees/d169`
-  (`perf/d169-rare-anchor`); work budget C + X3 in `.claude/worktrees/budget` (`feat/work-budget`). Each WIP-commits
-  on its branch and reports gates; the orchestrator reviews and merges. If the session died: read each branch's log
-  and last commit, then relaunch a builder from the branch.
+- D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
+- Work budget (item 16 B): `feat/work-budget` ef191e78 (main merged in), builder gates GREEN (timing indicative, quiet
+  retake worthwhile; harness worktree `.claude/worktrees/budget-main`); blind review (Opus, background) running. Then
+  merge `--no-ff`, ratchet, inspect, push.
+- D172 registered 2026-11-23 (set walk never polls; reproduced); fix after the budget merge (same loop).
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
@@ -51,5 +50,5 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. Owner 2026-11-23 (DECISIONS): work budget C + X3; D71 closed (H); tonight is a timing window; push main after gates.
 
-**Next action:** check CI on 0d311b31; when the D169 and work-budget builders report, verify their gates (VERIFICATION.md:
-a claim is a hypothesis until reproduced), blind-review, merge `--no-ff`, ratchet, inspect, push.
+**Next action:** when the budget blind review reports: reproduce findings, fix or merge, gates, push; then D172 builder
+(chunk the set walk, poll between chunks, test-first, D166 gates).

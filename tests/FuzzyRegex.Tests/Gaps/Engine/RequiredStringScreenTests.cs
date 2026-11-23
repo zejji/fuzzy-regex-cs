@@ -233,7 +233,7 @@ public sealed class RequiredStringScreenTests
 
         Match match = regex.Match(subject, beginning, length);
         (match.Success ? $"{match.Index},{match.Length}" : "").Should().Be(found);
-        string.Join(";", regex.Matches(subject, beginning, length).Select(m => $"{m.Index},{m.Length}"))
+        string.Join(";", regex.Matches(subject, beginning, length).Select(static m => $"{m.Index},{m.Length}"))
             .Should()
             .Be(all);
         regex.IsMatch(subject, beginning, length).Should().Be(found.Length > 0);
