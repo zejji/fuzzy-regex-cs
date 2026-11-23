@@ -516,6 +516,8 @@ internal static class RequiredStringScreen
                     else if (special > char.MaxValue)
                     {
                         // Alone: from the first folding character anywhere, or part-way at the edge.
+                        // The tables hold no special that reaches the first case yet
+                        // (RequiredStringScreenTests.No_special_outside_the_bmp_folds_to_one_character_inside_it).
                         int previous = reverse ? f + 1 : f - 1;
                         if (previous < 0 || previous >= length)
                         {
