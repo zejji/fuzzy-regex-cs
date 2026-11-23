@@ -37,7 +37,9 @@ measurement, WPR profiles and benchmarks.
 
 - Quiet-machine timing done 2026-11-23 (1c01df05, `.scratch/timing-1123/results.md`): D168 A-D and D116g faster on
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
-- Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI on it: check `gh run list`.
+- Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
+- D169 builder done 2026-11-23: `perf/d169-rare-anchor` 1dee129a, gates GREEN per its report (D169 row); orchestrator
+  reproduced hostile-i/long 720 to 0.003 ms; blind review (Opus, background) running. Then merge, ratchet, inspect.
 - Builders started 2026-11-23 ~22:00 (Opus, background, this session): D169 in `.claude/worktrees/d169`
   (`perf/d169-rare-anchor`); work budget C + X3 in `.claude/worktrees/budget` (`feat/work-budget`). Each WIP-commits
   on its branch and reports gates; the orchestrator reviews and merges. If the session died: read each branch's log
