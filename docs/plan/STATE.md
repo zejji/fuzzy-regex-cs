@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-23 21:20 by Claude Code (owner decisions recorded; overnight plan set).
+**Updated:** 2026-11-23 22:05 by Claude Code (timing done, main pushed, two builders running).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -37,9 +37,11 @@ measurement, WPR profiles and benchmarks.
 
 - Quiet-machine timing done 2026-11-23 (1c01df05, `.scratch/timing-1123/results.md`): D168 A-D and D116g faster on
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
-- Merged to main 2026-11-22, not pushed: D166 227dcc16 (+F156 cdc9300a), D167 c31bf0c8 (+F157 827fc7ae), D163 D11 part
-  57e674fd, judge D170/D171 804ccc9c (F159, F160), D168 A bcc8a64e, D168 B/C/D f78fd9eb, D116g efc9771f. Ratchet on
-  main: GREEN 10,526 on efc9771f (baseline unchanged). Worktrees kept: d166, d167, d163, judge-d170, d168b, d116g. CI last GREEN on 40f09940 (run 44948175075).
+- Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI on it: check `gh run list`.
+- Builders started 2026-11-23 ~22:00 (Opus, background, this session): D169 in `.claude/worktrees/d169`
+  (`perf/d169-rare-anchor`); work budget C + X3 in `.claude/worktrees/budget` (`feat/work-budget`). Each WIP-commits
+  on its branch and reports gates; the orchestrator reviews and merges. If the session died: read each branch's log
+  and last commit, then relaunch a builder from the branch.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
@@ -47,6 +49,5 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. Owner 2026-11-23 (DECISIONS): work budget C + X3; D71 closed (H); tonight is a timing window; push main after gates.
 
-**Next action (overnight 2026-11-23):** (1) inspection + ratchet on main, then `git push --no-verify`, check CI;
-(2) D169 builder: WPR profiled 2026-11-23 (89% in `RequiredStringScreen.Scan`, scalar window walk per first-unit hit,
-n x m), design rare-anchor search, test-first; (3) item 16 B builder: C + X3 per the design note sections 6-9.
+**Next action:** check CI on 0d311b31; when the D169 and work-budget builders report, verify their gates (VERIFICATION.md:
+a claim is a hypothesis until reproduced), blind-review, merge `--no-ff`, ratchet, inspect, push.
