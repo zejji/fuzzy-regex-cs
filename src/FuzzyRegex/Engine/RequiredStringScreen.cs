@@ -34,7 +34,7 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// </para>
 /// <para>
 /// <b>Cost.</b> A vectorised search for the code units that could hold one of the string's
-/// characters picks the windows to check: the rarest-looking one among those a window that could
+/// characters picks the windows to check: the one the string repeats least among those a window that could
 /// match holds at a fixed distance from its edge (<see cref="ChooseAnchor"/>, D169). The first scan stops at the place nearest the attempt
 /// position, which costs next to nothing when there is one close by, as <c>string_search</c> does
 /// upstream. The answer is remembered on the <see cref="MatchState"/> (keyed on the slice bounds),
@@ -368,7 +368,7 @@ internal static class RequiredStringScreen
 
     /// <summary>
     /// Which required character, by reading-order index, <see cref="Scan(MatchState, Node, bool, bool, out bool)"/>
-    /// searches for (D169): the one that looks rarest among those a window that could match holds
+    /// searches for (D169): the one the string repeats least among those a window that could match holds
     /// at a fixed distance in code units from its edge.
     /// </summary>
     /// <remarks>
@@ -399,9 +399,16 @@ internal static class RequiredStringScreen
     /// characters before the anchor fix its distance.
     /// </para>
     /// <para>
-    /// <b>Which.</b> The character that occurs fewest times in the string itself, because text
-    /// that defeats the search is text that resembles the string; ties go to the character rarer
-    /// in English text (<see cref="Commonness"/>), then to the lower index.
+    /// <b>Which.</b> The character that occurs fewest times in the string itself, the lowest index
+    /// on a tie. Text that defeats the search is text that resembles the string, and a walk from
+    /// each place holding the first character can only run long when the string repeats that
+    /// character: a window that matched L characters holds no other copy of a character the string
+    /// holds once, so the next place is at least L on and the walks add up to the text's length.
+    /// So a string whose first character occurs once keeps it, which is what every string searched
+    /// for before D169, and a string that repeats it moves to its least repeated one. A guess at
+    /// how common characters are in text was tried and dropped: an anchor of <c>k</c> for
+    /// <c>(?i)Market Night</c> made a search over text full of <c>k</c> 4 to 5 times slower
+    /// (2026-11-23).
     /// </para>
     /// </remarks>
     /// <param name="reqString">The required-string node.</param>
@@ -427,7 +434,7 @@ internal static class RequiredStringScreen
 
         var followers = new Dictionary<uint, (uint[] Next, bool WideAtEdge)?>();
         int best = 0;
-        (int Count, int Commonness) bestKey = (counts[At(0)], Commonness(At(0)));
+        int bestCount = counts[At(0)];
 
         for (int k = 1; k < length; k++)
         {
@@ -457,11 +464,10 @@ internal static class RequiredStringScreen
                 }
             }
 
-            (int Count, int Commonness) key = (counts[At(k)], Commonness(At(k)));
-            if (key.CompareTo(bestKey) < 0)
+            if (counts[At(k)] < bestCount)
             {
                 best = k;
-                bestKey = key;
+                bestCount = counts[At(k)];
             }
         }
 
@@ -531,39 +537,6 @@ internal static class RequiredStringScreen
         }
 
         return ([.. next], wideAtEdge);
-    }
-
-    /// <summary>
-    /// For <see cref="ChooseAnchor"/>'s ties: roughly how common a character is in text, higher
-    /// for commoner. Space, then the English letters by their usual frequency order, then digits,
-    /// other ASCII, and anything else last. A guess that only breaks ties, so it needs only to be
-    /// better than none.
-    /// </summary>
-    /// <param name="ch">The required character.</param>
-    /// <returns>The rank, 0 to 40.</returns>
-    private static int Commonness(uint ch)
-    {
-        const string lettersRarestFirst = "zqxjkvbpygfwmucldrhsnioate";
-
-        if (ch == ' ')
-        {
-            return 40;
-        }
-
-        uint lower = ch is >= 'A' and <= 'Z' ? ch | 0x20 : ch;
-        int letter = lower < 0x80 ? lettersRarestFirst.IndexOf((char)lower, StringComparison.Ordinal) : -1;
-
-        if (letter >= 0)
-        {
-            return 12 + letter;
-        }
-
-        if (ch is >= '0' and <= '9')
-        {
-            return 10;
-        }
-
-        return ch < 0x80 ? 1 : 0;
     }
 
     /// <summary>
