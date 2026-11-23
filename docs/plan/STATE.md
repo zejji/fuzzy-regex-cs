@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-23 by Claude Code (d71b removed; D168 review lead closed as ledger 2, pinned).
+**Updated:** 2026-11-23 21:20 by Claude Code (owner decisions recorded; overnight plan set).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -43,7 +43,9 @@ measurement, WPR profiles and benchmarks.
 
 ## Waiting on the owner
 
-- D71: option H or F (D71 row).
-- Item 16 B: choose the work budget API (C, A, B or D) and exception (X1-X3) from `2026-11-22-work-budget-design.md` section 10 (recommended: C, a per-call budget object; X3, a new exception).
+- Nothing. Owner 2026-11-23 (DECISIONS): work budget C + X3; D71 closed (H); tonight is a timing window; push main after gates.
 
-**Next action:** (1) quiet-machine timing (A-B-B-A, peers told) for D166, D167, D163, D168, D116g; (2) owner: work-budget API (`2026-11-22-work-budget-design.md`), D71 option H; (3) D169: WPR profile first.
+**Next action (overnight 2026-11-23):** (1) quiet-machine timing A-B-B-A for D166, D167, D163, D168, D116g (peers told,
+AC sleep Never, back to 30 min after); (2) inspection + ratchet on main, then `git push --no-verify`, check CI; (3) D169
+builder: WPR profiled 2026-11-23 (89% in `RequiredStringScreen.Scan`, scalar window walk per first-unit hit, n x m),
+design rare-anchor search, test-first; (4) item 16 B builder: C + X3 per the design note sections 6-9.
