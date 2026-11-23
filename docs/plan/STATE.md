@@ -35,6 +35,9 @@ measurement, WPR profiles and benchmarks.
 
 ## In flight
 
+- Timing subagent started 2026-11-23 ~21:25 (Opus, background): writes timing clauses into the D166, D167, D163, D168,
+  D116g rows, logs in `.scratch/timing-1123/`, sets AC sleep Never and must restore 30 min. If the session died: check
+  `powercfg /q` standby AC, restore 30, read `.scratch/timing-1123/results.md`, re-run what is missing.
 - Merged to main 2026-11-22, not pushed: D166 227dcc16 (+F156 cdc9300a), D167 c31bf0c8 (+F157 827fc7ae), D163 D11 part
   57e674fd, judge D170/D171 804ccc9c (F159, F160), D168 A bcc8a64e, D168 B/C/D f78fd9eb, D116g efc9771f. Ratchet on
   main: GREEN 10,526 on efc9771f (baseline unchanged). Worktrees kept: d166, d167, d163, judge-d170, d168b, d116g. CI last GREEN on 40f09940 (run 44948175075).
