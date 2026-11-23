@@ -72,9 +72,9 @@ public sealed class RequiredStringScreenTests
     [Arguments("(?ri)zzs")]
     [Arguments("(?ri)zzß")]
     [Arguments("(?ri)zzσ")]
-    [Arguments("(?i)abkzz")]
-    [Arguments("(?ri)zzkba")]
-    [Arguments("(?i)ab\U00010400zz")]
+    [Arguments("(?i)ababkzz")]
+    [Arguments("(?ri)zzkbaba")]
+    [Arguments("(?i)abab\U00010400zz")]
     public void Every_character_that_could_take_the_first_required_character_is_searched_for(string pattern)
     {
         PatternObject compiled = new FuzzyRegex(pattern).PatternObject;
@@ -176,11 +176,12 @@ public sealed class RequiredStringScreenTests
     [Arguments("(?i)kkq", "a\u212aKq", 0, -1, "1,3", "1,3")]
     [Arguments("(?i)saq", "\u017faq", 0, -1, "0,3", "0,3")]
     [Arguments("(?i)ssq", "\u017fsq", 0, -1, "0,3", "0,3")]
-    // Python answers None for these two: it pairs i with the dotted capital I (Turkic), which
+    // Python answers None for these three: it pairs i with the dotted capital I (Turkic), which
     // this port does not, so here the capital fully folds to i and a combining dot
     // (docs/DIVERGENCES.md, "The Turkic I pairings").
     [Arguments("(?fi)i\u0307q", "x\u0130q", 0, -1, "1,2", "1,2")]
     [Arguments("(?i)i\u0307q", "x\u0130q", 0, -1, "1,2", "1,2")]
+    [Arguments("(?fi)i\u0307i\u0307q", "x\u0130\u0130q", 0, -1, "1,3", "1,3")]
     [Arguments("(?ri)qkk", "aqK\u212ab", 0, -1, "1,3", "1,3")]
     [Arguments("(?ri)qkk", "aqK\u212abqkk", 0, -1, "5,3", "5,3;1,3")]
     [Arguments("(?ri)zss", "z\u00dfx", 0, -1, "0,2", "0,2")]
@@ -197,11 +198,22 @@ public sealed class RequiredStringScreenTests
     [Arguments("(?ai)kkq", "\u212aKq kKq", 0, -1, "4,3", "4,3")]
     [Arguments("(?i)ab\U00010400", "xab\U00010428", 0, -1, "1,4", "1,4")]
     [Arguments("(?i)ab\U00010400", "x\U00010428ab\U00010428", 0, -1, "3,4", "3,4")]
+    [Arguments("(?i)abab\U00010400", "xabab\U00010428", 0, -1, "1,6", "1,6")]
+    [Arguments("(?i)abab\U00010400", "x\U00010428abab\U00010428abab\U00010400", 0, -1, "3,6", "3,6;9,6")]
     [Arguments("(?fi)stq", "\ufb06qx", 0, -1, "0,2", "0,2")]
+    [Arguments("(?fi)ststq", "\ufb06\ufb06q", 0, -1, "0,3", "0,3")]
+    [Arguments("(?fi)ffffi", "x\ufb00\ufb00i", 0, -1, "1,3", "1,3")]
+    [Arguments("(?fi)ffffi", "x\ufb00f\ufb01", 0, -1, "1,3", "1,3")]
+    [Arguments("(?fi)fffi", "x\ufb00\ufb01", 0, -1, "1,2", "1,2")]
+    [Arguments("(?fi)ststq", "xst\ufb06q", 0, -1, "1,4", "1,4")]
+    [Arguments("(?rfi)qxstxst", "aqxstx\ufb06", 0, -1, "1,6", "1,6")]
+    [Arguments("(?i)xsxsq", "x\u017fxSq", 0, -1, "0,5", "0,5")]
     [Arguments("(?i)\U00010400\U00010400z", "x\U00010428\U00010400z", 0, -1, "1,5", "1,5")]
     [Arguments("(?r)z\U00010400\U00010400", "az\U00010400\U00010400", 0, -1, "1,5", "1,5")]
     [Arguments("(?i)saq", "\U0001df95aq", 0, -1, "", "")]
     [Arguments("(?i)saq", "x\U0001df95aqsaq", 0, -1, "5,3", "5,3")]
+    [Arguments("(?i)sasaq", "\U0001df95asaq", 0, -1, "", "")]
+    [Arguments("(?i)sasaq", "x\U0001df95asaqsasaq", 0, -1, "7,5", "7,5")]
     [Arguments("(?i)[s]saq", "\U0001df95aq", 0, -1, "0,4", "0,4")]
     [Arguments("(?i)[s]saq", "x\u00dfaq", 0, -1, "1,3", "1,3")]
     [Arguments("(?rfi)qst", "xq\ufb06", 0, -1, "1,2", "1,2")]
@@ -227,11 +239,12 @@ public sealed class RequiredStringScreenTests
     }
 
     /// <summary>
-    /// D169. Which required character the screen searches for: the one rarest in the string,
-    /// then rarest in English, then the first; never one past a character that a subject
+    /// D169. Which required character the screen searches for: the one the string repeats
+    /// least, the first on a tie, so a string that holds its first character once keeps it; never
+    /// one past a character that a subject
     /// character of another width, or one that takes two required characters, could take. The
     /// rows that stop early are each one of those: sharp s (ss), the st ligature (st, both
-    /// directions), dotted capital I (i and a combining dot), an astral letter, and an s at the
+    /// directions), the ff ligature, dotted capital I (i and a combining dot), an astral letter, and an s at the
     /// window's edge, which U+1DF95 (two units, folding to ss) may take alone with the tail of
     /// its folding.
     /// </summary>
@@ -241,26 +254,27 @@ public sealed class RequiredStringScreenTests
     [Arguments("(?i)kkq", 2)]
     [Arguments("(?i)saq", 0)]
     [Arguments("(?i)[s]saq", 0)]
-    [Arguments("(?i)xsaq", 3)]
+    [Arguments("(?i)xsxsq", 4)]
+    [Arguments("(?i)sasaq", 0)]
+    [Arguments("(?i)Market Night", 0)]
     [Arguments("(?i)aab", 2)]
     [Arguments("(?ai)kkq", 2)]
     [Arguments("(?ri)qkk", 2)]
     [Arguments("(?r)qaa", 2)]
-    [Arguments("(?i)abkzz", 2)]
-    [Arguments("(?i)ab\U00010400", 2)]
+    [Arguments("(?i)ababkzz", 4)]
+    [Arguments("(?i)abab\U00010400", 4)]
     [Arguments("(?i)ababababcb", 8)]
     [Arguments("(?ri)bcabababab", 8)]
     [Arguments("(?fi)ssz", 0)]
     [Arguments("(?rfi)zss", 0)]
-    [Arguments("(?fi)stq", 0)]
-    [Arguments("(?rfi)qst", 0)]
-    [Arguments("(?fi)st\u00e9", 0)]
-    [Arguments("(?rfi)\u00e9st", 0)]
-    [Arguments("(?fi)i\u0307q", 0)]
+    [Arguments("(?fi)ststq", 0)]
+    [Arguments("(?fi)ffffi", 0)]
+    [Arguments("(?rfi)qxstxst", 0)]
+    [Arguments("(?fi)i\u0307i\u0307q", 0)]
     [Arguments("(?i)\U00010400z", 0)]
     [Arguments("(?i)\U00010400\U00010400z", 0)]
     [Arguments("(?r)z\U00010400\U00010400", 0)]
-    [Arguments("(?i)x\U00010400z", 1)]
+    [Arguments("(?i)xx\U00010400z", 2)]
     public void The_screen_searches_for_the_rarest_character_at_a_fixed_distance(string pattern, int anchor) =>
         new FuzzyRegex(pattern).PatternObject.ReqScreenAnchor.Should().Be(anchor);
 
@@ -275,12 +289,12 @@ public sealed class RequiredStringScreenTests
     /// </summary>
     /// <param name="pattern">The pattern.</param>
     [Test]
-    [Arguments("(?i)ahjntwyq")]
-    [Arguments("(?ri)qywtnjha")]
-    [Arguments("(?fi)ahjntwyq")]
-    [Arguments("(?i)kskq")]
-    [Arguments("(?i)asazq")]
-    [Arguments("(?ri)qtsa")]
+    [Arguments("(?i)ahjntwyahjntwyq")]
+    [Arguments("(?ri)qywtnjhaywtnjha")]
+    [Arguments("(?fi)ahjntwyahjntwyq")]
+    [Arguments("(?i)kskskq")]
+    [Arguments("(?i)asasazq")]
+    [Arguments("(?ri)qtsatsa")]
     [Arguments("(?i)\u03c3\u03b9\u03c3\u03b9w")]
     public void Every_character_before_the_anchor_takes_one_code_unit_and_one_required_character(string pattern)
     {
