@@ -33,8 +33,9 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// what keeps a node holding the unfolded literal inside the superset.
 /// </para>
 /// <para>
-/// <b>Cost.</b> A vectorised search for the code units that could hold the string's first
-/// character picks the windows to check. The first scan stops at the place nearest the attempt
+/// <b>Cost.</b> A vectorised search for the code units that could hold one of the string's
+/// characters picks the windows to check: the one the string repeats least among those a window that could
+/// match holds at a fixed distance from its edge (<see cref="ChooseAnchor"/>, D169). The first scan stops at the place nearest the attempt
 /// position, which costs next to nothing when there is one close by, as <c>string_search</c> does
 /// upstream. The answer is remembered on the <see cref="MatchState"/> (keyed on the slice bounds),
 /// so attempts short of it cost one comparison. Past it, a caller that takes the start-position
@@ -163,17 +164,72 @@ internal static class RequiredStringScreen
     /// <returns>The position, or <see cref="_notFound"/>.</returns>
     private static int Scan(MatchState state, Node reqString, bool reverse, bool farthest, out bool cancelled)
     {
+        PatternObject pattern = state.Pattern;
+        int found = Scan(
+            state,
+            reqString,
+            reverse,
+            farthest,
+            pattern.ReqScreenUnits!,
+            pattern.ReqScreenAnchor,
+            out cancelled
+        );
+
+#if DEBUG
+        // D169: searching for the anchor finds exactly what searching for the first character
+        // finds, which is the screen's answer before the anchor. Checked on short slices only,
+        // where the first-character search cannot be the n x m walk the anchor replaced; the
+        // check leaves the cancellation gate's count as it found it.
+        if (!cancelled && pattern.ReqScreenAnchor > 0 && state.SliceEnd - state.SliceStart <= 4_096)
+        {
+            ushort iterations = state.Iterations;
+            int plain = Scan(state, reqString, reverse, farthest, ScreenUnits(reqString, 0)!, 0, out bool stopped);
+            state.Iterations = iterations;
+            Debug.Assert(
+                stopped || plain == found,
+                "D169: the anchor search finds what the first-character search finds"
+            );
+        }
+#endif
+
+        return found;
+    }
+
+    /// <summary>
+    /// <see cref="Scan(MatchState, Node, bool, bool, out bool)"/> searching for the required
+    /// character at reading index <paramref name="anchor"/>.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="reqString">The required-string node.</param>
+    /// <param name="reverse">Whether the pattern reads right to left.</param>
+    /// <param name="farthest">Whether to find the farthest place rather than the nearest.</param>
+    /// <param name="units">The code units that could hold the anchor character (<see cref="ScreenUnits"/>).</param>
+    /// <param name="anchor">The anchor's reading-order index (<see cref="ChooseAnchor"/>).</param>
+    /// <param name="cancelled">Set when the timeout or token ended the pass.</param>
+    /// <returns>The position, or <see cref="_notFound"/>.</returns>
+    private static int Scan(
+        MatchState state,
+        Node reqString,
+        bool reverse,
+        bool farthest,
+        SearchValues<char> units,
+        int anchor,
+        out bool cancelled
+    )
+    {
         cancelled = false;
 
-        SearchValues<char> units = state.Pattern.ReqScreenUnits!;
         ReadOnlySpan<char> text = state.Text.Span;
 
         // Candidates are window starts in [TextPos, SliceEnd) forward, and window ends in
-        // (SliceStart, TextPos] reversed. The code units that could hold the window's first
-        // character (reading order) are searched for in [low, high), from whichever end is nearer
-        // the place wanted.
-        int low = reverse ? state.SliceStart : state.TextPos;
-        int high = reverse ? state.TextPos : state.SliceEnd;
+        // (SliceStart, TextPos] reversed. Every character before the anchor (reading order) takes
+        // exactly one code unit (ChooseAnchor), so in a window that could match, the anchor
+        // character starts 'anchor' units after the window's start (forward) or ends 'anchor'
+        // units before its end (reverse). The code units that could hold it are searched for in
+        // [low, high), from whichever end is nearer the place wanted; each place found names one
+        // window, in the same order as the windows themselves.
+        int low = reverse ? state.SliceStart : state.TextPos + anchor;
+        int high = reverse ? state.TextPos - anchor : state.SliceEnd;
         bool descending = reverse != farthest;
 
         while (low < high)
@@ -192,20 +248,22 @@ internal static class RequiredStringScreen
 
             hit += low;
 
-            // The whole character the unit belongs to, within the range.
-            int edge;
+            // The whole character the unit belongs to, within the range: where it starts (forward)
+            // or ends (reverse).
+            int at;
             if (reverse)
             {
                 bool pairStart =
                     hit + 1 < high && char.IsHighSurrogate(text[hit]) && char.IsLowSurrogate(text[hit + 1]);
-                edge = pairStart ? hit + 2 : hit + 1;
+                at = pairStart ? hit + 2 : hit + 1;
             }
             else
             {
                 bool pairEnd = hit > low && char.IsLowSurrogate(text[hit]) && char.IsHighSurrogate(text[hit - 1]);
-                edge = pairEnd ? hit - 1 : hit;
+                at = pairEnd ? hit - 1 : hit;
             }
 
+            int edge = reverse ? at + anchor : at - anchor;
             if (WindowMayMatch(state, reqString, edge, reverse))
             {
                 return edge;
@@ -214,11 +272,11 @@ internal static class RequiredStringScreen
             // Past that character, in the direction of the search.
             if (descending)
             {
-                high = reverse ? state.PrevPos(edge) : edge;
+                high = reverse ? state.PrevPos(at) : at;
             }
             else
             {
-                low = reverse ? edge : state.NextPos(edge);
+                low = reverse ? at : state.NextPos(at);
             }
         }
 
@@ -226,22 +284,23 @@ internal static class RequiredStringScreen
     }
 
     /// <summary>
-    /// The code units <see cref="Scan"/> searches for: every one that could hold a subject
-    /// character able to take the required string's first character in reading order, under any
-    /// rule <see cref="WindowMayMatch"/> applies.
+    /// The code units <see cref="Scan(MatchState, Node, bool, bool, out bool)"/> searches for:
+    /// every one that could hold a subject character able to take the required character at
+    /// reading index <paramref name="anchor"/>, under any rule <see cref="WindowMayMatch"/> applies.
     /// </summary>
     /// <remarks>
-    /// For a case-insensitive string that is the closure of the first character under
+    /// For a case-insensitive string that is the closure of that character under
     /// <see cref="Encodings.AllCases"/>, plus those of the <see cref="Specials"/> (characters with a
     /// case whose full folding is longer than one character, or whose case data is not a plain
-    /// equivalence class) that have a case whose folding holds the first character. Outside the
-    /// specials, a character's cases share one single-character folding and each is in the others'
-    /// case sets, so it can take the first required character only by being in that character's
-    /// closure. An astral character contributes both its surrogates.
+    /// equivalence class) that have a case whose folding holds it. Outside the specials, a
+    /// character's cases share one single-character folding and each is in the others' case sets,
+    /// so it can take a required character only by being in that character's closure. An astral
+    /// character contributes both its surrogates.
     /// </remarks>
     /// <param name="reqString">The required-string node.</param>
+    /// <param name="anchor">The reading-order index (<see cref="ChooseAnchor"/>).</param>
     /// <returns>The code units, or <see langword="null"/> when the screen does not apply.</returns>
-    internal static SearchValues<char>? FirstUnits(Node reqString)
+    internal static SearchValues<char>? ScreenUnits(Node reqString, int anchor)
     {
         if (!Covers(reqString.Op) || reqString.Encoding == CaseEncoding.Locale || reqString.Values.Length == 0)
         {
@@ -249,7 +308,7 @@ internal static class RequiredStringScreen
         }
 
         var units = new HashSet<char>();
-        foreach (uint codepoint in FirstCodepoints(reqString))
+        foreach (uint codepoint in TakerCodepoints(reqString, anchor))
         {
             if (codepoint is >= 0xD800 and <= 0xDFFF or > 0x10FFFF)
             {
@@ -272,30 +331,233 @@ internal static class RequiredStringScreen
     }
 
     /// <summary>
-    /// The subject characters that could take a literal node's first character in reading order:
-    /// the character itself for a case-sensitive node, otherwise its closure under
-    /// <see cref="Encodings.AllCases"/> plus the <see cref="Specials"/> with a case whose folding
-    /// holds it. <see cref="FirstUnits"/> and <c>PatternObject.FindLeadingStrings</c> share it.
+    /// The subject characters that could take a literal node's first character in reading order.
+    /// <see cref="TakerCodepoints"/> at index 0; <c>PatternObject.FindLeadingStrings</c> uses it.
     /// </summary>
     /// <param name="node">
     /// A non-empty <c>String</c>, <c>Character</c>, <c>CharacterIgn</c> or a node <see cref="Covers"/>
     /// accepts, whose encoding is not <c>LOCALE</c> if it ignores case.
     /// </param>
     /// <returns>The codepoints.</returns>
-    internal static HashSet<uint> FirstCodepoints(Node node)
+    internal static HashSet<uint> FirstCodepoints(Node node) => TakerCodepoints(node, 0);
+
+    /// <summary>
+    /// The subject characters that could take a literal node's character at reading index
+    /// <paramref name="index"/>: the character itself for a case-sensitive node, otherwise its
+    /// closure under <see cref="Encodings.AllCases"/> plus the <see cref="Specials"/> with a case
+    /// whose folding holds it.
+    /// </summary>
+    /// <param name="node">As for <see cref="FirstCodepoints"/>.</param>
+    /// <param name="index">The reading-order index, below the node's length.</param>
+    /// <returns>The codepoints.</returns>
+    private static HashSet<uint> TakerCodepoints(Node node, int index)
     {
         bool reverse = node.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
-        uint first = node.Values[reverse ? node.Values.Length - 1 : 0];
+        uint want = node.Values[reverse ? node.Values.Length - 1 - index : index];
 
         if (node.Op is Opcode.StringRev or Opcode.String or Opcode.Character)
         {
-            return [first];
+            return [want];
         }
 
-        HashSet<uint> codepoints = CaseClosure(node.Encoding, first);
+        HashSet<uint> codepoints = CaseClosure(node.Encoding, want);
         CaseEncoding encoding = node.Encoding;
-        codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
+        codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, want)));
         return codepoints;
+    }
+
+    /// <summary>
+    /// Which required character, by reading-order index, <see cref="Scan(MatchState, Node, bool, bool, out bool)"/>
+    /// searches for (D169): the one the string repeats least among those a window that could match holds
+    /// at a fixed distance in code units from its edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why.</b> Searching for the first character costs a window walk at every place that holds
+    /// it. Text that resembles the string, such as <c>"ab"</c> repeated against a long
+    /// <c>"abab...cb"</c>, holds the first character everywhere and walks each window almost to its
+    /// end: the text's length times the string's. Searched for, the <c>c</c> is not there at all.
+    /// </para>
+    /// <para>
+    /// <b>When the distance is fixed.</b> The character at index k is exactly k code units from the
+    /// edge of every window that could match when each subject character that could take one of
+    /// the k characters before it is a single code unit and takes exactly one required character.
+    /// The window walk lets a subject character take a required one by being in its closure (one
+    /// for one: <see cref="ScreenUnits"/> says why nothing outside the <see cref="Specials"/> can
+    /// take it otherwise), or a special take a run of them from the full folding of one of its
+    /// cases. A run starts at the first folding character (reading order), except at the window's
+    /// edge, where it may start part-way; and it ends at the last, or fails, unless it reaches the
+    /// end of the string, which no index before the anchor is. So a special takes index j alone
+    /// only through a folding character that is the last, and that is also the first or j is 0;
+    /// any other folding character that takes index j takes index j + 1 with the next one, in
+    /// reading order, or nothing. Index j therefore qualifies when its character's closure is all
+    /// single units, no special that could take it alone is two units (U+1DF95, which folds to
+    /// "ss", is one: it may take an "s" at index 0 alone), and no folding character that could
+    /// take it is followed by one that is index j + 1 ignoring case. A run that took index j from
+    /// part-way through the folding started at j - 1, which then failed that last test. The first
+    /// index that fails bounds the choice, which may land on that index itself: only the
+    /// characters before the anchor fix its distance.
+    /// </para>
+    /// <para>
+    /// <b>Which.</b> The character that occurs fewest times in the string itself, counting its
+    /// other cases as the same character, the lowest index on a tie. Text that defeats the search is text that resembles the string, and a walk from
+    /// each place holding the first character can only run long when the string repeats that
+    /// character: a window that matched L characters holds no other copy of a character the string
+    /// holds once, so the next place is at least L on and the walks add up to the text's length.
+    /// So a string whose first character occurs once keeps it, which is what every string searched
+    /// for before D169, and a string that repeats it moves to its least repeated one. A guess at
+    /// how common characters are in text was tried and dropped: an anchor of <c>k</c> for
+    /// <c>(?i)Market Night</c> took a search over text full of <c>k</c> from 0.044-0.047 to
+    /// 0.195-0.231 ms a call (Release, indicative, 2026-11-23).
+    /// </para>
+    /// </remarks>
+    /// <param name="reqString">The required-string node.</param>
+    /// <returns>The reading-order index; 0 when the screen does not apply.</returns>
+    internal static int ChooseAnchor(Node reqString)
+    {
+        uint[] values = reqString.Values;
+        int length = values.Length;
+        if (!Covers(reqString.Op) || reqString.Encoding == CaseEncoding.Locale || length < 2)
+        {
+            return 0;
+        }
+
+        bool reverse = reqString.Op is Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev;
+        bool exact = reqString.Op == Opcode.StringRev;
+        CaseEncoding encoding = reqString.Encoding;
+
+        // Counted by case class, so that "Abab" counts its a twice: the lowest member of the
+        // character's closure stands for the class.
+        var classes = new Dictionary<uint, uint>();
+        var counts = new Dictionary<uint, int>();
+        foreach (uint value in values)
+        {
+            uint key = ClassOf(value);
+            counts[key] = counts.GetValueOrDefault(key) + 1;
+        }
+
+        var followers = new Dictionary<uint, (uint[] Next, bool WideAtEdge)?>();
+        int best = 0;
+        int bestCount = counts[ClassOf(At(0))];
+
+        for (int k = 1; k < length; k++)
+        {
+            uint before = At(k - 1);
+            if (exact)
+            {
+                if (before > char.MaxValue || char.IsSurrogate((char)before))
+                {
+                    break;
+                }
+            }
+            else
+            {
+                if (!followers.TryGetValue(before, out (uint[] Next, bool WideAtEdge)? takers))
+                {
+                    takers = SpecialFollowers(encoding, before, reverse);
+                    followers[before] = takers;
+                }
+
+                if (
+                    takers is not { } known
+                    || (k == 1 && known.WideAtEdge)
+                    || known.Next.Any(follower => Matcher.SameCharIgn(encoding, At(k), follower))
+                )
+                {
+                    break;
+                }
+            }
+
+            int count = counts[ClassOf(At(k))];
+            if (count < bestCount)
+            {
+                best = k;
+                bestCount = count;
+            }
+        }
+
+        return best;
+
+        uint At(int index) => values[reverse ? length - 1 - index : index];
+
+        uint ClassOf(uint value)
+        {
+            if (exact)
+            {
+                return value;
+            }
+
+            if (!classes.TryGetValue(value, out uint key))
+            {
+                key = CaseClosure(encoding, value).Min();
+                classes[value] = key;
+            }
+
+            return key;
+        }
+    }
+
+    /// <summary>
+    /// For <see cref="ChooseAnchor"/>: every character that follows, in reading order, a character
+    /// of a special's folding that takes <paramref name="want"/>, and whether a special of two
+    /// code units could take it alone at the window's edge; or <see langword="null"/> when a
+    /// subject character of two code units could take it alone anywhere.
+    /// </summary>
+    /// <param name="encoding">The encoding in force, not <c>LOCALE</c>.</param>
+    /// <param name="want">The required character.</param>
+    /// <param name="reverse">Whether reading order is right to left.</param>
+    /// <returns>The following characters and the edge flag, or <see langword="null"/>.</returns>
+    private static (uint[] Next, bool WideAtEdge)? SpecialFollowers(CaseEncoding encoding, uint want, bool reverse)
+    {
+        if (CaseClosure(encoding, want).Any(static ch => ch > char.MaxValue || char.IsSurrogate((char)ch)))
+        {
+            return null;
+        }
+
+        CaseBuffer casesBuffer = default;
+        Span<uint> cases = casesBuffer;
+        FoldBuffer foldedBuffer = default;
+        Span<uint> folded = foldedBuffer;
+        var next = new List<uint>();
+        bool wideAtEdge = false;
+
+        foreach (uint special in Specials)
+        {
+            int count = Encodings.AllCases(encoding, special, cases);
+            for (int c = 0; c < count; c++)
+            {
+                int length = Encodings.FullCaseFold(encoding, cases[c], folded);
+                for (int f = 0; f < length; f++)
+                {
+                    if (!Matcher.SameCharIgn(encoding, want, folded[f]))
+                    {
+                        continue;
+                    }
+
+                    int after = reverse ? f - 1 : f + 1;
+                    bool last = after < 0 || after >= length;
+                    if (!last)
+                    {
+                        next.Add(folded[after]);
+                    }
+                    else if (special > char.MaxValue)
+                    {
+                        // Alone: from the first folding character anywhere, or part-way at the edge.
+                        // The tables hold no special that reaches the first case yet
+                        // (RequiredStringScreenTests.No_special_outside_the_bmp_folds_to_one_character_inside_it).
+                        int previous = reverse ? f + 1 : f - 1;
+                        if (previous < 0 || previous >= length)
+                        {
+                            return null;
+                        }
+
+                        wideAtEdge = true;
+                    }
+                }
+            }
+        }
+
+        return ([.. next], wideAtEdge);
     }
 
     /// <summary>
@@ -346,7 +608,7 @@ internal static class RequiredStringScreen
     /// <c>s</c> under the Unicode encoding but not under ASCII. A full-folding node must also hold
     /// no run that the full folding of a case of a <see cref="Specials"/> character spells: outside
     /// the specials a character folds to one character of its own closure (see
-    /// <see cref="FirstUnits"/>), so only a special can take a run of another length or outside
+    /// <see cref="ScreenUnits"/>), so only a special can take a run of another length or outside
     /// the closure, and the matcher takes a folding whole or not at all (its <c>STRING_FLD</c> arm
     /// fails when the string ends inside one). That rules out <c>ss</c>, <c>st</c>, <c>fi</c>,
     /// <c>ff</c>, <c>fl</c> and the like, and nothing else in ASCII.
