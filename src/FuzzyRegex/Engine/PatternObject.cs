@@ -367,11 +367,20 @@ internal sealed class PatternObject
     internal string? ReqStringText;
 
     /// <summary>
-    /// NOT UPSTREAM'S: every UTF-16 code unit that could hold the first character (in reading order)
-    /// of <see cref="ReqString"/> for <c>Engine.RequiredStringScreen</c>, which searches for these
-    /// with a vectorised scan before checking a window. Null when the screen does not apply.
+    /// NOT UPSTREAM'S: every UTF-16 code unit that could hold the character of
+    /// <see cref="ReqString"/> at reading index <see cref="ReqScreenAnchor"/>, for
+    /// <c>Engine.RequiredStringScreen</c>, which searches for these with a vectorised scan before
+    /// checking a window. Null when the screen does not apply.
     /// </summary>
     internal System.Buffers.SearchValues<char>? ReqScreenUnits;
+
+    /// <summary>
+    /// NOT UPSTREAM'S (D169): the reading-order index of the required character
+    /// <c>Engine.RequiredStringScreen</c> searches for, chosen by
+    /// <c>RequiredStringScreen.ChooseAnchor</c>. A window that could hold the string holds that
+    /// character exactly this many code units from its edge. 0 when the screen does not apply.
+    /// </summary>
+    internal int ReqScreenAnchor;
 
     /// <summary>
     /// Whether the compiled graph holds a <c>(*SKIP)</c>. <b>This port's own field</b> (S60):
@@ -1571,7 +1580,8 @@ internal sealed class PatternObject
 
             if (self.ReqString is Node screened)
             {
-                self.ReqScreenUnits = RequiredStringScreen.FirstUnits(screened);
+                self.ReqScreenAnchor = RequiredStringScreen.ChooseAnchor(screened);
+                self.ReqScreenUnits = RequiredStringScreen.ScreenUnits(screened, self.ReqScreenAnchor);
             }
         }
 
