@@ -407,8 +407,8 @@ internal static class RequiredStringScreen
     /// So a string whose first character occurs once keeps it, which is what every string searched
     /// for before D169, and a string that repeats it moves to its least repeated one. A guess at
     /// how common characters are in text was tried and dropped: an anchor of <c>k</c> for
-    /// <c>(?i)Market Night</c> made a search over text full of <c>k</c> 4 to 5 times slower
-    /// (2026-11-23).
+    /// <c>(?i)Market Night</c> took a search over text full of <c>k</c> from 0.044-0.047 to
+    /// 0.195-0.231 ms a call (Release, indicative, 2026-11-23).
     /// </para>
     /// </remarks>
     /// <param name="reqString">The required-string node.</param>
