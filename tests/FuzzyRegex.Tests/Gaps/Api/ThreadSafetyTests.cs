@@ -1016,6 +1016,8 @@ public sealed class ThreadSafetyTests
             // Written once by Compile, beside ReqStringText; SearchValues is immutable and
             // thread-safe. The screen's per-search cache lives on the MatchState.
             "PatternObject.ReqScreenUnits",
+            // Written once by Compile, beside ReqScreenUnits (D169).
+            "PatternObject.ReqScreenAnchor",
             "PatternObject.ReqOffset",
             "PatternObject.ReqString",
             "PatternObject.ReqStringText",

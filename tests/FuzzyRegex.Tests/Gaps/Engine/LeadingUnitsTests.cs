@@ -21,7 +21,7 @@ public sealed class LeadingUnitsTests
     /// never runs on, succeeds exactly when a match can begin with that character. Every
     /// codepoint of the BMP and plane 1 (Deseret, Adlam and the other cased astral scripts) is
     /// checked, and every 97th one above. The set must also stay inside what the engine admits
-    /// plus the special characters <c>RequiredStringScreen.FirstUnits</c>'s rule adds, so it
+    /// plus the special characters <c>RequiredStringScreen.FirstCodepoints</c>'s rule adds, so it
     /// cannot quietly grow to "everything". A branch of one character merges with its neighbours
     /// into a set, which the walk does not take, so each pattern keeps one branch longer.
     /// <c>(?fi)st|x</c> and <c>(?fi)k|xy</c> have a <c>CharacterIgn</c> branch. The last rows put a
