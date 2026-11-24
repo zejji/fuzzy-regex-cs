@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 03:45 by Claude Code (budget gated GREEN, 4 ns remainder for the owner; attribution running).
+**Updated:** 2026-11-24 04:30 by Claude Code (budget regression attributed; builder fixing).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -41,8 +41,8 @@ measurement, WPR profiles and benchmarks.
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
 - Work budget (item 16 B): `feat/work-budget` 651ac24d, all gates GREEN (review findings 1-5, D172, D173 fixed). Not
   merged: with no budget, short no-match fuzzy calls are ~4 ns (3-4%) slower in 6 quiet retakes, cause not found
-  (`.scratch/budget/timing/quiet-retake-2026-11-24.txt`). Attribution agent (Opus, background, WPR + ablation,
-  `.scratch/attr-1124/`) running. Owner decides: accept, or fix per attribution (rule: unavoidable cost to owner).
+  (`.scratch/budget/timing/quiet-retake-2026-11-24.txt`). Attributed 2026-11-24 (`.scratch/attr-1124/`): a 64-bit
+  idiv in the filter's sweep charge (~2 ns) and per-call tick recomputation (~1%); builder fixing both, then retake. Owner decides: accept, or fix per attribution (rule: unavoidable cost to owner).
 - D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
