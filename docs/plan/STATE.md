@@ -37,7 +37,7 @@ measurement, WPR profiles and benchmarks.
 
 - Quiet-machine timing done 2026-11-23 (1c01df05, `.scratch/timing-1123/results.md`): D168 A-D and D116g faster on
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
-- Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
+- Main pushed to 7b738ce5 2026-11-24 (D169 + test fix; ratchet and inspections GREEN; CI GREEN run 45292066358); later commits are docs only.
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
 - Work budget (item 16 B) READY TO MERGE on the owner's yes: `feat/work-budget` e9aca1d1 (worktree
   `.claude/worktrees/budget`), ratchet GREEN 10,757, oracle 3 seeds seam on/off GREEN, inspections GREEN, two blind
