@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 05:35 by Claude Code (budget at ~1-2%, delta review running; merge waits on owner).
+**Updated:** 2026-11-24 06:25 by Claude Code (delta review clean bar one low finding, fix in progress).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -41,8 +41,9 @@ measurement, WPR profiles and benchmarks.
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
 - Work budget (item 16 B): `feat/work-budget` 1dda4ae6, gates GREEN. No-budget cost after the attributed fixes
   (idiv, ticks): short calls ~1-2% slower (quiet retake 8, `.scratch/budget/timing/analysis-quiet8.txt`), the per-call
-  budget checks in Init/DoMatch/SafeCheckCancel; long rows same. Blind review of the delta ef191e78..1dda4ae6 (Opus,
-  background) running. Merge waits on the owner.
+  budget checks in Init/DoMatch/SafeCheckCancel; long rows same. Delta blind review 2026-11-24: 0 answer differences, no
+  state leaks; one low finding (piece-search charges skip the poll gate: overshoot up to ~165k units, bounded) being
+  fixed by the builder. Merge waits on the owner.
 - D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
