@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 01:30 by Claude Code (main pushed 7b738ce5; budget review fixes in progress).
+**Updated:** 2026-11-24 02:00 by Claude Code (CI GREEN on 7b738ce5; budget no-budget overhead being removed).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,9 +39,10 @@ measurement, WPR profiles and benchmarks.
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
 - Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
-- Work budget (item 16 B): `feat/work-budget` ef191e78; blind review 2026-11-24 found 4 issues (null rebinding, exact
-  limit on NextMatch, +16 B on EnumerateMatches/Split, overshoot in the fuzzy filter loop = D173). Builder resumed
-  (Opus, background) to fix them plus D172 and D173 on the branch. Then verify, merge `--no-ff`, gates, push.
+- Work budget (item 16 B): `feat/work-budget` 275bc187: review findings 1-5 fixed with D172 and D173 (gates GREEN).
+  Quiet retake 2026-11-24 (`.scratch/budget/timing/quiet-retake-2026-11-24.txt`): no-budget calls under 1 us +4-7 ns,
+  set-walk/backtrack rows ~2% slower. Builder (background) doing options A+B (budget code out of line, TimeoutTicks
+  once), then D if needed, quiet retake, gates. Then verify, merge, gates, push.
 - D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
