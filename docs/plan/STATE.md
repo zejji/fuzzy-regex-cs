@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 00:50 by Claude Code (D169 merged; budget in review; D172 registered).
+**Updated:** 2026-11-24 01:30 by Claude Code (main pushed 7b738ce5; budget review fixes in progress).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,10 +39,10 @@ measurement, WPR profiles and benchmarks.
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
 - Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
-- Work budget (item 16 B): `feat/work-budget` ef191e78 (main merged in), builder gates GREEN (timing indicative, quiet
-  retake worthwhile; harness worktree `.claude/worktrees/budget-main`); blind review (Opus, background) running. Then
-  merge `--no-ff`, ratchet, inspect, push.
-- D172 registered 2026-11-23 (set walk never polls; reproduced); fix after the budget merge (same loop).
+- Work budget (item 16 B): `feat/work-budget` ef191e78; blind review 2026-11-24 found 4 issues (null rebinding, exact
+  limit on NextMatch, +16 B on EnumerateMatches/Split, overshoot in the fuzzy filter loop = D173). Builder resumed
+  (Opus, background) to fix them plus D172 and D173 on the branch. Then verify, merge `--no-ff`, gates, push.
+- D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
@@ -50,5 +50,5 @@ measurement, WPR profiles and benchmarks.
 
 - Nothing. Owner 2026-11-23 (DECISIONS): work budget C + X3; D71 closed (H); tonight is a timing window; push main after gates.
 
-**Next action:** when the budget blind review reports: reproduce findings, fix or merge, gates, push; then D172 builder
-(chunk the set walk, poll between chunks, test-first, D166 gates).
+**Next action:** when the budget builder hands back: verify the four fixes and D172/D173 witnesses myself, re-review
+the delta, merge, gates, push. Owner to review: DECISIONS 2026-11-24 (nullable budget, residual CS0121).
