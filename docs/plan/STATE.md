@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 04:30 by Claude Code (budget regression attributed; builder fixing).
+**Updated:** 2026-11-24 05:35 by Claude Code (budget at ~1-2%, delta review running; merge waits on owner).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,18 +39,18 @@ measurement, WPR profiles and benchmarks.
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
 - Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
-- Work budget (item 16 B): `feat/work-budget` 651ac24d, all gates GREEN (review findings 1-5, D172, D173 fixed). Not
-  merged: with no budget, short no-match fuzzy calls are ~4 ns (3-4%) slower in 6 quiet retakes, cause not found
-  (`.scratch/budget/timing/quiet-retake-2026-11-24.txt`). Attributed 2026-11-24 (`.scratch/attr-1124/`): a 64-bit
-  idiv in the filter's sweep charge (~2 ns) and per-call tick recomputation (~1%); builder fixing both, then retake. Owner decides: accept, or fix per attribution (rule: unavoidable cost to owner).
+- Work budget (item 16 B): `feat/work-budget` 1dda4ae6, gates GREEN. No-budget cost after the attributed fixes
+  (idiv, ticks): short calls ~1-2% slower (quiet retake 8, `.scratch/budget/timing/analysis-quiet8.txt`), the per-call
+  budget checks in Init/DoMatch/SafeCheckCancel; long rows same. Blind review of the delta ef191e78..1dda4ae6 (Opus,
+  background) running. Merge waits on the owner.
 - D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
 ## Waiting on the owner
 
-- Work budget merge: accept ~4 ns (3-4%) on short no-match fuzzy calls without a budget, or pursue the fix the
-  attribution finds. Also review DECISIONS 2026-11-24 (nullable budget; residual CS0121 on literal null/default).
+- Work budget merge: accept ~1-2% on short calls without a budget (was 3-6% before tonight's fixes), or ask for
+  more. Also review DECISIONS 2026-11-24 (nullable budget; residual CS0121 on literal null/default).
 
-**Next action:** when the budget builder hands back: verify the four fixes and D172/D173 witnesses myself, re-review
-the delta, merge, gates, push. Owner to review: DECISIONS 2026-11-24 (nullable budget, residual CS0121).
+**Next action:** read the delta blind review; fix real findings on the branch. On the owner's yes: merge `--no-ff`,
+ratchet, inspect, push, CI. Then D163 Teddy/ASCII part (needs a quiet window).
