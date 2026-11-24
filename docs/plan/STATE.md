@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-24 06:25 by Claude Code (delta review clean bar one low finding, fix in progress).
+**Updated:** 2026-11-24 06:55 by Claude Code (overnight done: D169 merged and pushed; budget ready, waits on owner).
 **Released:** 1.0.0 (2026-10-20), 1.1.0 (2026-10-26), 1.2.0 (2026-11-05, release run 42013144639).
 Main: VersionPrefix 1.3.0, PackageValidationBaselineVersion 1.2.0.
 **Now:** phase 11, release 1.3 (performance). No fixed end date; aims to be fairly complete. The list
@@ -39,12 +39,11 @@ measurement, WPR profiles and benchmarks.
   their targets, D166, D167, D163 (D11 part) same; nothing slower. AC sleep restored to 30 min.
 - Pushed main 0d311b31 2026-11-23 (inspections GREEN, ratchet GREEN 10,526); CI GREEN (runs 45272733556, 45272733580).
 - D169 merged to main 76b7a1fe 2026-11-23 (blind review 350,289 cases, 0 differences; ratchet + inspections GREEN).
-- Work budget (item 16 B): `feat/work-budget` 1dda4ae6, gates GREEN. No-budget cost after the attributed fixes
-  (idiv, ticks): short calls ~1-2% slower (quiet retake 8, `.scratch/budget/timing/analysis-quiet8.txt`), the per-call
-  budget checks in Init/DoMatch/SafeCheckCancel; long rows same. Delta blind review 2026-11-24: 0 answer differences, no
-  state leaks; one low finding (piece-search charges skip the poll gate: overshoot up to ~165k units, bounded) being
-  fixed by the builder. Merge waits on the owner.
-- D172, D173 registered (unpolled set walk; unpolled fuzzy filter candidate loop), both reproduced on main.
+- Work budget (item 16 B) READY TO MERGE on the owner's yes: `feat/work-budget` e9aca1d1 (worktree
+  `.claude/worktrees/budget`), ratchet GREEN 10,757, oracle 3 seeds seam on/off GREEN, inspections GREEN, two blind
+  reviews (all findings fixed, the 2nd's low finding verified fixed by the orchestrator), D172 and D173 fixed on it.
+  No-budget cost, quiet retake 9: short rows +0.2-2.2% (`.scratch/budget/timing/analysis-quiet9.txt`), long rows same.
+- D172, D173 (unpolled set walk; unpolled fuzzy filter candidate loop): fixed on `feat/work-budget`, land with it.
 - D71 option E: worktree and branch removed 2026-11-23; the unsound patch stays at `.scratch/d71b/option-e.patch`.
 - Deferred: D134, D136, D137, D142; oracle rows D161, D162. Parked: transpositions (post-1.3). Owner, end of phase 11: delete the WPR scheduled tasks.
 
@@ -53,5 +52,5 @@ measurement, WPR profiles and benchmarks.
 - Work budget merge: accept ~1-2% on short calls without a budget (was 3-6% before tonight's fixes), or ask for
   more. Also review DECISIONS 2026-11-24 (nullable budget; residual CS0121 on literal null/default).
 
-**Next action:** read the delta blind review; fix real findings on the branch. On the owner's yes: merge `--no-ff`,
-ratchet, inspect, push, CI. Then D163 Teddy/ASCII part (needs a quiet window).
+**Next action:** owner: yes/no on the work budget (above). On yes: merge `--no-ff`, ratchet, inspect, push, CI; mark
+D172/D173 fixed (F rows). Then D163 Teddy/ASCII part (needs a quiet window).
